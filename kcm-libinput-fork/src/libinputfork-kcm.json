@@ -1,0 +1,20 @@
+{
+    "KPlugin": {
+        "Description": "Circular scrolling and cursor momentum for the libinput fork",
+        "Description[zh_CN]": "libinput 分支的圆形滚动与光标惯性",
+        "Icon": "input-touchpad",
+        "Id": "kcm_libinputfork",
+        "License": "GPL-2.0-or-later",
+        "Name": "Touchpad Gestures (Fork)",
+        "Name[zh_CN]": "触摸板手势（分支）"
+    },
+    "X-KDE-Keywords": "touchpad,circular,momentum,scroll,libinput",
+    "X-KDE-System-Settings-Parent-Category": "input-devices",
+    "X-KDE-Weight": 40,
+    "X-KDE-ServiceTypes": [
+        "KCModule"
+    ],
+    "X-KDE-ParentComponents": [
+        "kcm_touchpad"
+    ]
+}

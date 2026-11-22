@@ -1,9 +1,12 @@
-# build outputs
-build/
-_build/
-*.pkg.tar.*
-pkg/
-src/
+# Package build outputs. Anchored so they cannot match a source "src/"
+# directory (libinput and the KCM both have one).
+/build/
+/_build/
+/*.pkg.tar.*
+/libinput/pkg/
+/libinput/build/
+/libinput/src/pkg/
+/kcm-libinput-fork/build/
 # editor / OS
 *.swp
 .DS_Store
