@@ -1,0 +1,19 @@
+# Copy the block you want into /etc/libinput/local-overrides.quirks to
+# enable the libinput fork's features on any touchpad, on any desktop,
+# without any compositor support.
+#
+# See README.fork.md for the full list of attributes and their ranges.
+# Note that libinput requires at least one Match* line per section, and
+# that every section must have at least one property.
+
+[Example: circular scrolling on every Synaptics touchpad]
+MatchName=*Synaptics*
+AttrCircularScrollEnabled=1
+AttrCircularScrollTrigger=0
+AttrCircularScrollDistance=5.7
+
+[Example: cursor momentum on a specific touchpad]
+MatchName=*My Touchpad*
+AttrPointerMomentumEnabled=1
+AttrPointerMomentumStrength=150
+AttrPointerMomentumMinVelocity=120

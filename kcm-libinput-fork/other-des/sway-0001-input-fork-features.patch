@@ -1,0 +1,426 @@
+diff --git a/include/sway/commands.h b/include/sway/commands.h
+index eea6dd7..8f16033 100644
+--- a/include/sway/commands.h
++++ b/include/sway/commands.h
+@@ -270,6 +270,12 @@ sway_cmd input_cmd_repeat_delay;
+ sway_cmd input_cmd_repeat_rate;
+ sway_cmd input_cmd_scroll_button;
+ sway_cmd input_cmd_scroll_button_lock;
++sway_cmd input_cmd_circular_scrolling;
++sway_cmd input_cmd_circular_scroll_trigger;
++sway_cmd input_cmd_circular_scroll_distance;
++sway_cmd input_cmd_pointer_momentum;
++sway_cmd input_cmd_pointer_momentum_strength;
++sway_cmd input_cmd_pointer_momentum_min_velocity;
+ sway_cmd input_cmd_scroll_method;
+ sway_cmd input_cmd_tap;
+ sway_cmd input_cmd_tap_button_map;
+diff --git a/include/sway/config.h b/include/sway/config.h
+index 90d2dab..97f9107 100644
+--- a/include/sway/config.h
++++ b/include/sway/config.h
+@@ -166,6 +166,13 @@ struct input_config {
+ 	int scroll_button;
+ 	int scroll_button_lock;
+ 	int scroll_method;
++	// libinput fork: circular scrolling parameters and pointer momentum.
++	// INT_MIN means "not configured"; the fork's defaults apply.
++	int circular_scroll_trigger;
++	double circular_scroll_distance;
++	int pointer_momentum;
++	int pointer_momentum_strength;
++	double pointer_momentum_min_velocity;
+ 	int send_events;
+ 	int tap;
+ 	int tap_button_map;
+diff --git a/meson.build b/meson.build
+index 748931b..2237334 100644
+--- a/meson.build
++++ b/meson.build
+@@ -114,6 +114,13 @@ foreach sym : ['LIBINPUT_CONFIG_ACCEL_PROFILE_CUSTOM', 'LIBINPUT_CONFIG_DRAG_LOC
+ 	conf_data.set10('HAVE_' + sym, cc.has_header_symbol('libinput.h', sym, dependencies: libinput))
+ endforeach
+ 
++# The libinput fork adds pointer momentum and a configurable circular
++# scrolling trigger/distance. Both are optional: without them the
++# corresponding sway commands report that they are unavailable.
++conf_data.set10('HAVE_LIBINPUT_FORK', cc.has_function(
++	'libinput_device_config_momentum_is_available',
++	dependencies: libinput))
++
+ scdoc = dependency('scdoc', version: '>=1.9.2', native: true, required: get_option('man-pages'))
+ if scdoc.found()
+ 	scdoc_prog = find_program(scdoc.get_variable(pkgconfig: 'scdoc'), native: true)
+diff --git a/sway/commands/input.c b/sway/commands/input.c
+index f9ad764..7a981c0 100644
+--- a/sway/commands/input.c
++++ b/sway/commands/input.c
+@@ -29,6 +29,12 @@ static const struct cmd_handler input_handlers[] = {
+ 	{ "rotation_angle", input_cmd_rotation_angle },
+ 	{ "scroll_button", input_cmd_scroll_button },
+ 	{ "scroll_button_lock", input_cmd_scroll_button_lock },
++	{ "circular_scrolling", input_cmd_circular_scrolling },
++	{ "circular_scroll_trigger", input_cmd_circular_scroll_trigger },
++	{ "circular_scroll_distance", input_cmd_circular_scroll_distance },
++	{ "pointer_momentum", input_cmd_pointer_momentum },
++	{ "pointer_momentum_strength", input_cmd_pointer_momentum_strength },
++	{ "pointer_momentum_min_velocity", input_cmd_pointer_momentum_min_velocity },
+ 	{ "scroll_factor", input_cmd_scroll_factor },
+ 	{ "scroll_method", input_cmd_scroll_method },
+ 	{ "tap", input_cmd_tap },
+diff --git a/sway/commands/input/circular_scrolling.c b/sway/commands/input/circular_scrolling.c
+new file mode 100644
+index 0000000..0f39456
+--- /dev/null
++++ b/sway/commands/input/circular_scrolling.c
+@@ -0,0 +1,109 @@
++#define _POSIX_C_SOURCE 200809L
++#include <libinput.h>
++#include <stdlib.h>
++#include <string.h>
++#include <strings.h>
++#include "sway/commands.h"
++#include "sway/config.h"
++#include "sway/input/input-manager.h"
++#include "util.h"
++
++struct cmd_results *input_cmd_circular_scrolling(int argc, char **argv) {
++	struct cmd_results *error = NULL;
++	if ((error = checkarg(argc, "circular_scrolling", EXPECTED_EQUAL_TO, 1))) {
++		return error;
++	}
++	struct input_config *ic = config->handler_context.input_config;
++	if (!ic) {
++		return cmd_results_new(CMD_FAILURE, "No input device defined.");
++	}
++
++#if HAVE_LIBINPUT_FORK
++	if (strcasecmp(argv[0], "enabled") == 0) {
++		ic->scroll_method = LIBINPUT_CONFIG_SCROLL_CIRCULAR;
++	} else if (strcasecmp(argv[0], "disabled") == 0) {
++		ic->scroll_method = LIBINPUT_CONFIG_SCROLL_2FG;
++	} else {
++		return cmd_results_new(CMD_INVALID,
++			"Expected 'circular_scrolling <enabled|disabled>'");
++	}
++	return cmd_results_new(CMD_SUCCESS, NULL);
++#else
++	return cmd_results_new(CMD_FAILURE,
++		"circular_scrolling requires libinput with the fork's "
++		"circular scrolling support");
++#endif
++}
++
++struct cmd_results *input_cmd_circular_scroll_trigger(int argc, char **argv) {
++	struct cmd_results *error = NULL;
++	if ((error = checkarg(argc, "circular_scroll_trigger",
++			EXPECTED_EQUAL_TO, 1))) {
++		return error;
++	}
++	struct input_config *ic = config->handler_context.input_config;
++	if (!ic) {
++		return cmd_results_new(CMD_FAILURE, "No input device defined.");
++	}
++
++#if HAVE_LIBINPUT_FORK
++	static const struct {
++		const char *name;
++		int value;
++	} triggers[] = {
++		{ "any_edge", 0 },
++		{ "top_edge", 1 },
++		{ "top_right_corner", 2 },
++		{ "right_edge", 3 },
++		{ "bottom_right_corner", 4 },
++		{ "bottom_edge", 5 },
++		{ "bottom_left_corner", 6 },
++		{ "left_edge", 7 },
++		{ "top_left_corner", 8 },
++	};
++
++	for (size_t i = 0; i < sizeof(triggers) / sizeof(triggers[0]); i++) {
++		if (strcasecmp(argv[0], triggers[i].name) == 0) {
++			ic->circular_scroll_trigger = triggers[i].value;
++			return cmd_results_new(CMD_SUCCESS, NULL);
++		}
++	}
++
++	return cmd_results_new(CMD_INVALID,
++		"Expected 'circular_scroll_trigger <any_edge|top_edge|"
++		"top_right_corner|right_edge|bottom_right_corner|bottom_edge|"
++		"bottom_left_corner|left_edge|top_left_corner>'");
++#else
++	return cmd_results_new(CMD_FAILURE,
++		"circular_scroll_trigger requires libinput with the fork's "
++		"circular scrolling support");
++#endif
++}
++
++struct cmd_results *input_cmd_circular_scroll_distance(int argc, char **argv) {
++	struct cmd_results *error = NULL;
++	if ((error = checkarg(argc, "circular_scroll_distance",
++			EXPECTED_EQUAL_TO, 1))) {
++		return error;
++	}
++	struct input_config *ic = config->handler_context.input_config;
++	if (!ic) {
++		return cmd_results_new(CMD_FAILURE, "No input device defined.");
++	}
++
++#if HAVE_LIBINPUT_FORK
++	float distance = parse_float(argv[0]);
++	if (isnan(distance)) {
++		return cmd_results_new(CMD_INVALID, "Invalid distance '%s'", argv[0]);
++	} else if (distance <= 0.0f) {
++		return cmd_results_new(CMD_INVALID,
++			"Distance must be greater than 0 degrees");
++	}
++	ic->circular_scroll_distance = distance;
++	return cmd_results_new(CMD_SUCCESS, NULL);
++#else
++	return cmd_results_new(CMD_FAILURE,
++		"circular_scroll_distance requires libinput with the fork's "
++		"circular scrolling support");
++#endif
++}
+diff --git a/sway/commands/input/pointer_momentum.c b/sway/commands/input/pointer_momentum.c
+new file mode 100644
+index 0000000..a6fac3f
+--- /dev/null
++++ b/sway/commands/input/pointer_momentum.c
+@@ -0,0 +1,90 @@
++#include <libinput.h>
++#include <stdlib.h>
++#include <string.h>
++#include <strings.h>
++#include "sway/commands.h"
++#include "sway/config.h"
++#include "sway/input/input-manager.h"
++#include "util.h"
++
++struct cmd_results *input_cmd_pointer_momentum(int argc, char **argv) {
++	struct cmd_results *error = NULL;
++	if ((error = checkarg(argc, "pointer_momentum", EXPECTED_EQUAL_TO, 1))) {
++		return error;
++	}
++	struct input_config *ic = config->handler_context.input_config;
++	if (!ic) {
++		return cmd_results_new(CMD_FAILURE, "No input device defined.");
++	}
++
++#if HAVE_LIBINPUT_FORK
++	if (strcasecmp(argv[0], "enabled") == 0) {
++		ic->pointer_momentum = 1;
++	} else if (strcasecmp(argv[0], "disabled") == 0) {
++		ic->pointer_momentum = 0;
++	} else {
++		return cmd_results_new(CMD_INVALID,
++			"Expected 'pointer_momentum <enabled|disabled>'");
++	}
++	return cmd_results_new(CMD_SUCCESS, NULL);
++#else
++	return cmd_results_new(CMD_FAILURE,
++		"pointer_momentum requires libinput with the fork's momentum support");
++#endif
++}
++
++struct cmd_results *input_cmd_pointer_momentum_strength(int argc, char **argv) {
++	struct cmd_results *error = NULL;
++	if ((error = checkarg(argc, "pointer_momentum_strength",
++			EXPECTED_EQUAL_TO, 1))) {
++		return error;
++	}
++	struct input_config *ic = config->handler_context.input_config;
++	if (!ic) {
++		return cmd_results_new(CMD_FAILURE, "No input device defined.");
++	}
++
++#if HAVE_LIBINPUT_FORK
++	char *end;
++	long strength = strtol(argv[0], &end, 10);
++	if (*end != '\0') {
++		return cmd_results_new(CMD_INVALID, "Invalid strength '%s'", argv[0]);
++	} else if (strength < 10 || strength > 400) {
++		return cmd_results_new(CMD_INVALID,
++			"Strength must be between 10 and 400");
++	}
++	ic->pointer_momentum_strength = strength;
++	return cmd_results_new(CMD_SUCCESS, NULL);
++#else
++	return cmd_results_new(CMD_FAILURE,
++		"pointer_momentum_strength requires libinput with the fork's "
++		"momentum support");
++#endif
++}
++
++struct cmd_results *input_cmd_pointer_momentum_min_velocity(int argc, char **argv) {
++	struct cmd_results *error = NULL;
++	if ((error = checkarg(argc, "pointer_momentum_min_velocity",
++			EXPECTED_EQUAL_TO, 1))) {
++		return error;
++	}
++	struct input_config *ic = config->handler_context.input_config;
++	if (!ic) {
++		return cmd_results_new(CMD_FAILURE, "No input device defined.");
++	}
++
++#if HAVE_LIBINPUT_FORK
++	float velocity = parse_float(argv[0]);
++	if (isnan(velocity)) {
++		return cmd_results_new(CMD_INVALID, "Invalid velocity '%s'", argv[0]);
++	} else if (velocity < 0.0f) {
++		return cmd_results_new(CMD_INVALID, "Velocity must not be negative");
++	}
++	ic->pointer_momentum_min_velocity = velocity;
++	return cmd_results_new(CMD_SUCCESS, NULL);
++#else
++	return cmd_results_new(CMD_FAILURE,
++		"pointer_momentum_min_velocity requires libinput with the fork's "
++		"momentum support");
++#endif
++}
+diff --git a/sway/config/input.c b/sway/config/input.c
+index 11169eb..7df5594 100644
+--- a/sway/config/input.c
++++ b/sway/config/input.c
+@@ -39,6 +39,11 @@ struct input_config *new_input_config(const char* identifier) {
+ 	input->scroll_button = INT_MIN;
+ 	input->scroll_button_lock = INT_MIN;
+ 	input->scroll_method = INT_MIN;
++	input->circular_scroll_trigger = INT_MIN;
++	input->circular_scroll_distance = -1.0;
++	input->pointer_momentum = INT_MIN;
++	input->pointer_momentum_strength = INT_MIN;
++	input->pointer_momentum_min_velocity = -1.0;
+ 	input->left_handed = INT_MIN;
+ 	input->repeat_delay = INT_MIN;
+ 	input->repeat_rate = INT_MIN;
+@@ -108,6 +113,21 @@ void merge_input_config(struct input_config *dst, struct input_config *src) {
+ 	if (src->scroll_button_lock != INT_MIN) {
+ 		dst->scroll_button_lock = src->scroll_button_lock;
+ 	}
++	if (src->circular_scroll_trigger != INT_MIN) {
++		dst->circular_scroll_trigger = src->circular_scroll_trigger;
++	}
++	if (src->circular_scroll_distance >= 0.0) {
++		dst->circular_scroll_distance = src->circular_scroll_distance;
++	}
++	if (src->pointer_momentum != INT_MIN) {
++		dst->pointer_momentum = src->pointer_momentum;
++	}
++	if (src->pointer_momentum_strength != INT_MIN) {
++		dst->pointer_momentum_strength = src->pointer_momentum_strength;
++	}
++	if (src->pointer_momentum_min_velocity >= 0.0) {
++		dst->pointer_momentum_min_velocity = src->pointer_momentum_min_velocity;
++	}
+ 	if (src->send_events != INT_MIN) {
+ 		dst->send_events = src->send_events;
+ 	}
+diff --git a/sway/input/libinput.c b/sway/input/libinput.c
+index b98216b..7132f32 100644
+--- a/sway/input/libinput.c
++++ b/sway/input/libinput.c
+@@ -198,6 +198,61 @@ static bool set_scroll_button_lock(struct libinput_device *dev,
+ 	return true;
+ }
+ 
++#if HAVE_LIBINPUT_FORK
++static bool set_circular_scroll_trigger(struct libinput_device *dev,
++		enum libinput_config_circular_scroll_trigger trigger) {
++	if (!libinput_device_config_circular_scroll_is_available(dev) ||
++			libinput_device_config_circular_scroll_get_trigger(dev) == trigger) {
++		return false;
++	}
++	sway_log(SWAY_DEBUG, "circular_scroll_set_trigger(%d)", trigger);
++	log_status(libinput_device_config_circular_scroll_set_trigger(dev, trigger));
++	return true;
++}
++
++static bool set_circular_scroll_distance(struct libinput_device *dev,
++		double distance) {
++	if (!libinput_device_config_circular_scroll_is_available(dev) ||
++			libinput_device_config_circular_scroll_get_distance(dev) == distance) {
++		return false;
++	}
++	sway_log(SWAY_DEBUG, "circular_scroll_set_distance(%f)", distance);
++	log_status(libinput_device_config_circular_scroll_set_distance(dev, distance));
++	return true;
++}
++
++static bool set_pointer_momentum(struct libinput_device *dev, int enabled) {
++	if (!libinput_device_config_momentum_is_available(dev) ||
++			libinput_device_config_momentum_get_enabled(dev) == enabled) {
++		return false;
++	}
++	sway_log(SWAY_DEBUG, "momentum_set_enabled(%d)", enabled);
++	log_status(libinput_device_config_momentum_set_enabled(dev, enabled));
++	return true;
++}
++
++static bool set_pointer_momentum_strength(struct libinput_device *dev, int strength) {
++	if (!libinput_device_config_momentum_is_available(dev) ||
++			libinput_device_config_momentum_get_strength(dev) == strength) {
++		return false;
++	}
++	sway_log(SWAY_DEBUG, "momentum_set_strength(%d)", strength);
++	log_status(libinput_device_config_momentum_set_strength(dev, strength));
++	return true;
++}
++
++static bool set_pointer_momentum_min_velocity(struct libinput_device *dev,
++		double velocity) {
++	if (!libinput_device_config_momentum_is_available(dev) ||
++			libinput_device_config_momentum_get_min_velocity(dev) == velocity) {
++		return false;
++	}
++	sway_log(SWAY_DEBUG, "momentum_set_min_velocity(%f)", velocity);
++	log_status(libinput_device_config_momentum_set_min_velocity(dev, velocity));
++	return true;
++}
++#endif
++
+ static bool set_dwt(struct libinput_device *device, bool dwt) {
+ 	if (!libinput_device_config_dwt_is_available(device) ||
+ 			libinput_device_config_dwt_get_enabled(device) == dwt) {
+@@ -319,6 +374,27 @@ bool sway_input_configure_libinput_device(struct sway_input_device *input_device
+ 	if (ic->scroll_button_lock != INT_MIN) {
+ 		changed |= set_scroll_button_lock(device, ic->scroll_button_lock);
+ 	}
++#if HAVE_LIBINPUT_FORK
++	if (ic->circular_scroll_trigger != INT_MIN) {
++		changed |= set_circular_scroll_trigger(device,
++				ic->circular_scroll_trigger);
++	}
++	if (ic->circular_scroll_distance >= 0.0) {
++		changed |= set_circular_scroll_distance(device,
++				ic->circular_scroll_distance);
++	}
++	if (ic->pointer_momentum != INT_MIN) {
++		changed |= set_pointer_momentum(device, ic->pointer_momentum);
++	}
++	if (ic->pointer_momentum_strength != INT_MIN) {
++		changed |= set_pointer_momentum_strength(device,
++				ic->pointer_momentum_strength);
++	}
++	if (ic->pointer_momentum_min_velocity >= 0.0) {
++		changed |= set_pointer_momentum_min_velocity(device,
++				ic->pointer_momentum_min_velocity);
++	}
++#endif
+ 	if (ic->dwt != INT_MIN) {
+ 		changed |= set_dwt(device, ic->dwt);
+ 	}
+diff --git a/sway/meson.build b/sway/meson.build
+index 2526c46..623d305 100644
+--- a/sway/meson.build
++++ b/sway/meson.build
+@@ -177,6 +177,8 @@ sway_sources = files(
+ 	'commands/input/scroll_button_lock.c',
+ 	'commands/input/scroll_factor.c',
+ 	'commands/input/scroll_method.c',
++	'commands/input/circular_scrolling.c',
++	'commands/input/pointer_momentum.c',
+ 	'commands/input/tap.c',
+ 	'commands/input/tap_button_map.c',
+ 	'commands/input/tool_mode.c',

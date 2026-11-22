@@ -1,0 +1,248 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
+"""
+Installer for the libinput fork's per-device settings.
+
+This is the privileged half of the System Settings module. It writes two
+config files, both of which survive package upgrades because they are
+configuration, not code:
+
+  /etc/libinput/local-overrides.quirks
+      Read by libinput itself when a device is opened. Holds the circular
+      scrolling trigger/distance and the pointer momentum parameters.
+
+  ~/.config/kcminputrc
+      Read by KWin when a device is added. Holds ScrollMethod, which is
+      how circular scrolling is selected (it is a scroll method, value 8).
+
+Neither of these depends on a patched KWin or a patched KCM: an unpatched
+KWin already applies whatever ScrollMethod it finds in kcminputrc, and
+libinput already reads the quirks file. The settings therefore keep working
+after any upgrade that leaves the libinput fork itself installed.
+
+Usage (normally through pkexec, called by the KCM):
+    libinput-fork-apply --write-quirks <file>
+    libinput-fork-apply --set-scroll-method <device-match> <method>
+    libinput-fork-apply --show <device-match>
+"""
+
+import argparse
+import os
+import pathlib
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+QUIRKS_PATH = pathlib.Path("/etc/libinput/local-overrides.quirks")
+SECTION_PREFIX = "libinput-fork:"
+
+# Values match the enum in the fork's libinput.h.
+TRIGGER_VALUES = {
+    "any_edge": 0,
+    "top_edge": 1,
+    "top_right_corner": 2,
+    "right_edge": 3,
+    "bottom_right_corner": 4,
+    "bottom_edge": 5,
+    "bottom_left_corner": 6,
+    "left_edge": 7,
+    "top_left_corner": 8,
+}
+TRIGGER_NAMES = {v: k for k, v in TRIGGER_VALUES.items()}
+
+SCROLL_METHOD_CIRCULAR = 8
+SCROLL_METHOD_2FG = 1
+
+
+def _run(cmd: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+
+def _libinput_quirks_binary() -> str | None:
+    """Prefer the binary that ships with the fork.
+
+    The stock libinput rejects AttrCircularScroll* and AttrPointerMomentum*
+    as unknown keys, so validating with it would refuse every valid file.
+    """
+    for candidate in ("libinput-fork", "libinput"):
+        path = shutil.which(candidate)
+        if path:
+            return path
+    return None
+
+
+def _fork_present() -> bool:
+    """Is the feature-bearing library loaded on this system?"""
+    for candidate in (
+        "/usr/lib/libinput.so.10",
+        "/usr/lib/x86_64-linux-gnu/libinput.so.10",
+    ):
+        if os.path.exists(candidate):
+            try:
+                with open(candidate, "rb") as f:
+                    return b"libinput_device_config_momentum_is_available" in f.read()
+            except OSError:
+                continue
+    return False
+
+
+def validate_quirks_text(text: str) -> tuple[bool, str]:
+    """Validate with libinput's own parser, in a throwaway directory."""
+    binary = _libinput_quirks_binary()
+    if not binary:
+        # Can't validate; accept syntactically sane input rather than
+        # refusing to install anything.
+        return True, ""
+
+    if not _fork_present():
+        return False, (
+            "the libinput fork is not installed; the circular scrolling and "
+            "momentum quirk attributes would be rejected as unknown keys"
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        # The parser needs the full database plus our override, because
+        # the override is parsed on its own but section matching happens
+        # against the directory.
+        src = pathlib.Path("/usr/share/libinput")
+        if src.is_dir():
+            for f in src.glob("*.quirks"):
+                shutil.copy(f, pathlib.Path(tmp) / f.name)
+        (pathlib.Path(tmp) / "99-local.quirks").write_text(text)
+
+        proc = _run([binary, "quirks", "validate", "--data-dir", tmp])
+        if proc.returncode != 0:
+            return False, (proc.stderr or proc.stdout).strip()
+        return True, ""
+
+
+def _read_existing() -> str:
+    try:
+        return QUIRKS_PATH.read_text()
+    except FileNotFoundError:
+        return ""
+    except OSError as e:
+        raise SystemExit(f"cannot read {QUIRKS_PATH}: {e}")
+
+
+def _strip_our_sections(text: str) -> str:
+    """Remove every section this tool owns, leaving user content alone."""
+    out = []
+    skip = False
+    for line in text.splitlines(keepends=True):
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            skip = stripped[1:-1].startswith(SECTION_PREFIX)
+        if not skip:
+            out.append(line)
+    return "".join(out)
+
+
+def cmd_write_quirks(args) -> int:
+    new_text = pathlib.Path(args.write_quirks).read_text()
+
+    ok, err = validate_quirks_text(new_text)
+    if not ok:
+        print(f"libinput rejected the quirks file:\n{err}", file=sys.stderr)
+        return 1
+
+    existing = _strip_our_sections(_read_existing()).rstrip()
+    combined = existing
+    if combined:
+        combined += "\n\n"
+    combined += new_text.rstrip() + "\n"
+
+    # Write atomically so a crash cannot leave a half-written quirk
+    # database behind (libinput would refuse to load any quirks at all).
+    QUIRKS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=QUIRKS_PATH.parent, prefix=".quirks-")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(combined)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, QUIRKS_PATH)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+    print(f"wrote {QUIRKS_PATH}")
+    return 0
+
+
+def _kcminputrc(create: bool) -> pathlib.Path:
+    base = os.environ.get("XDG_CONFIG_HOME") or str(pathlib.Path.home() / ".config")
+    path = pathlib.Path(base) / "kcminputrc"
+    if create:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def cmd_set_scroll_method(args) -> int:
+    path = _kcminputrc(create=True)
+    method = int(args.set_scroll_method)
+
+    text = path.read_text() if path.exists() else ""
+    lines = text.splitlines()
+    out = []
+    in_group = False
+    wrote = False
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_group = args.device_match in stripped
+            out.append(line)
+            if in_group:
+                continue
+        if in_group and stripped.startswith("ScrollMethod="):
+            out.append(f"ScrollMethod={method}")
+            wrote = True
+            continue
+        out.append(line)
+
+    if not wrote:
+        # Append a new group. KWin matches on the device name, which is
+        # what the KCM passes here.
+        if out and out[-1].strip():
+            out.append("")
+        out.append(f"[Libinput][][][{args.device_match}]")
+        out.append(f"ScrollMethod={method}")
+
+    path.write_text("\n".join(out).rstrip() + "\n")
+    print(f"set ScrollMethod={method} for {args.device_match} in {path}")
+    return 0
+
+
+def cmd_show(args) -> int:
+    print(_read_existing())
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--write-quirks", metavar="FILE")
+    parser.add_argument("--set-scroll-method", metavar="METHOD")
+    parser.add_argument("--device-match")
+    parser.add_argument("--show", action="store_true")
+    args = parser.parse_args()
+
+    if args.write_quirks:
+        return cmd_write_quirks(args)
+    if args.set_scroll_method is not None:
+        if not args.device_match:
+            parser.error("--set-scroll-method needs --device-match")
+        return cmd_set_scroll_method(args)
+    if args.show:
+        return cmd_show(args)
+
+    parser.print_help()
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

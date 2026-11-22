@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>LibinputForkConfig</class>
+ <widget class="QWidget" name="LibinputForkConfig">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>560</width><height>480</height></rect>
+  </property>
+  <layout class="QVBoxLayout" name="mainLayout">
+   <item>
+    <widget class="QGroupBox" name="deviceGroup">
+     <property name="title"><string>Touchpad</string></property>
+     <layout class="QVBoxLayout" name="deviceLayout">
+      <item>
+       <layout class="QHBoxLayout" name="deviceRow">
+        <item>
+         <widget class="QLabel" name="deviceLabel">
+          <property name="text"><string>Device:</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QComboBox" name="deviceCombo">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+            <horstretch>1</horstretch><verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
+   </item>
+
+   <item>
+    <widget class="QGroupBox" name="circularGroup">
+     <property name="title"><string>Circular scrolling</string></property>
+     <property name="checkable"><bool>true</bool></property>
+     <layout class="QFormLayout" name="circularLayout">
+      <item row="0" column="0" colspan="2">
+       <widget class="QLabel" name="circularHint">
+        <property name="text">
+         <string>Scroll by drawing circles on the touchpad edge. Small circles scroll faster than large ones.</string>
+        </property>
+        <property name="wordWrap"><bool>true</bool></property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="triggerLabel">
+        <property name="text"><string>Trigger region:</string></property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QComboBox" name="triggerCombo"/>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="distanceLabel">
+        <property name="text"><string>Scroll distance:</string></property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <layout class="QHBoxLayout" name="distanceRow">
+        <item>
+         <widget class="QSlider" name="distanceSlider">
+          <property name="orientation"><enum>Qt::Horizontal</enum></property>
+          <property name="minimum"><number>1</number></property>
+          <property name="maximum"><number>90</number></property>
+          <property name="value"><number>6</number></property>
+          <property name="tickPosition"><enum>QSlider::TicksBelow</enum></property>
+          <property name="tickInterval"><number>15</number></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="distanceValue">
+          <property name="minimumSize">
+           <size><width>90</width><height>0</height></size>
+          </property>
+          <property name="text"><string>6.0 degrees</string></property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item row="3" column="0" colspan="2">
+       <widget class="QLabel" name="distanceHint">
+        <property name="text">
+         <string>Lower values scroll faster for the same finger movement. 5.7° matches the original Synaptics driver default.</string>
+        </property>
+        <property name="wordWrap"><bool>true</bool></property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+
+   <item>
+    <widget class="QGroupBox" name="momentumGroup">
+     <property name="title"><string>Cursor momentum</string></property>
+     <property name="checkable"><bool>true</bool></property>
+     <layout class="QFormLayout" name="momentumLayout">
+      <item row="0" column="0" colspan="2">
+       <widget class="QLabel" name="momentumHint">
+        <property name="text">
+         <string>Keep the cursor gliding for a moment after a fast flick, slowing down to a stop.</string>
+        </property>
+        <property name="wordWrap"><bool>true</bool></property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="strengthLabel">
+        <property name="text"><string>Strength:</string></property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <layout class="QHBoxLayout" name="strengthRow">
+        <item>
+         <widget class="QSlider" name="strengthSlider">
+          <property name="orientation"><enum>Qt::Horizontal</enum></property>
+          <property name="minimum"><number>10</number></property>
+          <property name="maximum"><number>400</number></property>
+          <property name="value"><number>100</number></property>
+          <property name="tickPosition"><enum>QSlider::TicksBelow</enum></property>
+          <property name="tickInterval"><number>50</number></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="strengthValue">
+          <property name="minimumSize">
+           <size><width>70</width><height>0</height></size>
+          </property>
+          <property name="text"><string>100%</string></property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="minVelocityLabel">
+        <property name="text"><string>Start above:</string></property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <layout class="QHBoxLayout" name="velocityRow">
+        <item>
+         <widget class="QSlider" name="velocitySlider">
+          <property name="orientation"><enum>Qt::Horizontal</enum></property>
+          <property name="minimum"><number>0</number></property>
+          <property name="maximum"><number>600</number></property>
+          <property name="value"><number>120</number></property>
+          <property name="tickPosition"><enum>QSlider::TicksBelow</enum></property>
+          <property name="tickInterval"><number>100</number></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="velocityValue">
+          <property name="minimumSize">
+           <size><width>70</width><height>0</height></size>
+          </property>
+          <property name="text"><string>120</string></property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item row="3" column="0" colspan="2">
+       <widget class="QLabel" name="velocityHint">
+        <property name="text">
+         <string>Minimum flick speed that starts momentum. Slow, precise movements never fling the cursor.</string>
+        </property>
+        <property name="wordWrap"><bool>true</bool></property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+
+   <item>
+    <widget class="QLabel" name="statusLabel">
+     <property name="text"><string/></property>
+     <property name="wordWrap"><bool>true</bool></property>
+    </widget>
+   </item>
+   <item>
+    <spacer name="verticalSpacer">
+     <property name="orientation"><enum>Qt::Vertical</enum></property>
+     <property name="sizeHint" stdset="0">
+      <size><width>20</width><height>40</height></size>
+     </property>
+    </spacer>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

@@ -1,0 +1,9 @@
+# build outputs
+build/
+_build/
+*.pkg.tar.*
+pkg/
+src/
+# editor / OS
+*.swp
+.DS_Store
