@@ -406,4 +406,12 @@ LIBINPUT_1.32 {
 	libinput_device_config_momentum_set_enabled;
 	libinput_device_config_momentum_set_min_velocity;
 	libinput_device_config_momentum_set_strength;
+	libinput_device_config_momentum_get_decay_curve;
+	libinput_device_config_momentum_set_decay_curve;
+	libinput_device_config_scroll_get_circular_speed;
+	libinput_device_config_scroll_get_edge_speed;
+	libinput_device_config_scroll_get_two_finger_speed;
+	libinput_device_config_scroll_set_circular_speed;
+	libinput_device_config_scroll_set_edge_speed;
+	libinput_device_config_scroll_set_two_finger_speed;
 } LIBINPUT_1.31;

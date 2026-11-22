@@ -146,10 +146,17 @@ tp_momentum_handle_timeout(usec_t now, void *data)
 	if (elapsed <= 0.0)
 		elapsed = usec_as_uint64_t(MOMENTUM_INTERVAL) / 1000000.0;
 
-	/* Exponential decay. The strength scales the decay constant, so
-	 * a higher strength means the velocity decays more slowly. */
+	/* Exponential decay. The strength scales the decay constant, so a
+	 * higher strength means the velocity decays more slowly.
+	 *
+	 * decay_exponent reshapes the curve rather than the duration: below
+	 * 1 the cursor stops sharply, above 1 it keeps a little speed for
+	 * longer at the tail. It is clamped to keep pow() well behaved. */
+	const double exponent =
+		max(0.25, min(4.0, tp->momentum.decay_exponent));
 	decay = pow(MOMENTUM_DECAY_PER_SECOND,
-		    elapsed / momentum_clamp_strength(tp->momentum.strength));
+		    elapsed * exponent /
+			    momentum_clamp_strength(tp->momentum.strength));
 
 	tp->momentum.anim.velocity.x *= decay;
 	tp->momentum.anim.velocity.y *= decay;
@@ -283,6 +290,7 @@ tp_momentum_init(struct tp_dispatch *tp)
 	tp->momentum.enabled = false;
 	tp->momentum.strength = 100;
 	tp->momentum.min_velocity = 120.0;
+	tp->momentum.decay_exponent = 1.0;
 	tp->momentum.anim.active = false;
 
 	tp_momentum_config_init(tp);
@@ -359,6 +367,25 @@ tp_momentum_config_get_min_velocity(struct libinput_device *device)
 	return tp->momentum.min_velocity;
 }
 
+static enum libinput_config_status
+tp_momentum_config_set_decay_curve(struct libinput_device *device, double exponent)
+{
+	struct evdev_device *evdev = evdev_device(device);
+	struct tp_dispatch *tp = (struct tp_dispatch *)evdev->dispatch;
+
+	tp->momentum.decay_exponent = max(0.25, min(4.0, exponent));
+	return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static double
+tp_momentum_config_get_decay_curve(struct libinput_device *device)
+{
+	struct evdev_device *evdev = evdev_device(device);
+	struct tp_dispatch *tp = (struct tp_dispatch *)evdev->dispatch;
+
+	return tp->momentum.decay_exponent;
+}
+
 void
 tp_momentum_config_init(struct tp_dispatch *tp)
 {
@@ -371,4 +398,90 @@ tp_momentum_config_init(struct tp_dispatch *tp)
 	config->momentum.get_strength = tp_momentum_config_get_strength;
 	config->momentum.set_min_velocity = tp_momentum_config_set_min_velocity;
 	config->momentum.get_min_velocity = tp_momentum_config_get_min_velocity;
+	config->momentum.set_decay_curve = tp_momentum_config_set_decay_curve;
+	config->momentum.get_decay_curve = tp_momentum_config_get_decay_curve;
+}
+
+/* -------------------------------------------------------------------------
+ * Per-method scroll speed
+ * ------------------------------------------------------------------------- */
+
+#define TP_SCROLL_SPEED_MIN 0.1
+#define TP_SCROLL_SPEED_MAX 5.0
+
+static double
+clamp_scroll_speed(double multiplier)
+{
+	return max(TP_SCROLL_SPEED_MIN, min(TP_SCROLL_SPEED_MAX, multiplier));
+}
+
+static enum libinput_config_status
+tp_scroll_speed_set_two_finger(struct libinput_device *device, double multiplier)
+{
+	struct evdev_device *evdev = evdev_device(device);
+	struct tp_dispatch *tp = (struct tp_dispatch *)evdev->dispatch;
+
+	tp->scroll.speed.two_finger = clamp_scroll_speed(multiplier);
+	return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static double
+tp_scroll_speed_get_two_finger(struct libinput_device *device)
+{
+	struct evdev_device *evdev = evdev_device(device);
+	struct tp_dispatch *tp = (struct tp_dispatch *)evdev->dispatch;
+
+	return tp->scroll.speed.two_finger;
+}
+
+static enum libinput_config_status
+tp_scroll_speed_set_edge(struct libinput_device *device, double multiplier)
+{
+	struct evdev_device *evdev = evdev_device(device);
+	struct tp_dispatch *tp = (struct tp_dispatch *)evdev->dispatch;
+
+	tp->scroll.speed.edge = clamp_scroll_speed(multiplier);
+	return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static double
+tp_scroll_speed_get_edge(struct libinput_device *device)
+{
+	struct evdev_device *evdev = evdev_device(device);
+	struct tp_dispatch *tp = (struct tp_dispatch *)evdev->dispatch;
+
+	return tp->scroll.speed.edge;
+}
+
+static enum libinput_config_status
+tp_scroll_speed_set_circular(struct libinput_device *device, double multiplier)
+{
+	struct evdev_device *evdev = evdev_device(device);
+	struct tp_dispatch *tp = (struct tp_dispatch *)evdev->dispatch;
+
+	tp->scroll.speed.circular = clamp_scroll_speed(multiplier);
+	return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static double
+tp_scroll_speed_get_circular(struct libinput_device *device)
+{
+	struct evdev_device *evdev = evdev_device(device);
+	struct tp_dispatch *tp = (struct tp_dispatch *)evdev->dispatch;
+
+	return tp->scroll.speed.circular;
+}
+
+void
+tp_scroll_speed_config_init(struct tp_dispatch *tp)
+{
+	struct libinput_device_config_scroll_method *config =
+		&tp->scroll.config_method;
+
+	config->scroll_speed.set_two_finger_speed = tp_scroll_speed_set_two_finger;
+	config->scroll_speed.get_two_finger_speed = tp_scroll_speed_get_two_finger;
+	config->scroll_speed.set_edge_speed = tp_scroll_speed_set_edge;
+	config->scroll_speed.get_edge_speed = tp_scroll_speed_get_edge;
+	config->scroll_speed.set_circular_speed = tp_scroll_speed_set_circular;
+	config->scroll_speed.get_circular_speed = tp_scroll_speed_get_circular;
 }

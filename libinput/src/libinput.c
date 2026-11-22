@@ -4790,17 +4790,14 @@ LIBINPUT_EXPORT enum libinput_config_status
 libinput_device_config_scroll_set_method(struct libinput_device *device,
 					 enum libinput_config_scroll_method method)
 {
-	/* Check method is a single valid method */
-	switch (method) {
-	case LIBINPUT_CONFIG_SCROLL_NO_SCROLL:
-	case LIBINPUT_CONFIG_SCROLL_2FG:
-	case LIBINPUT_CONFIG_SCROLL_EDGE:
-	case LIBINPUT_CONFIG_SCROLL_ON_BUTTON_DOWN:
-	case LIBINPUT_CONFIG_SCROLL_CIRCULAR:
-		break;
-	default:
+	/* Methods may be combined: two-finger and circular scrolling address
+	 * different fingers, so a device can sensibly offer both. Anything
+	 * with unknown bits set is still invalid. */
+	if ((uint32_t)method & ~(uint32_t)(LIBINPUT_CONFIG_SCROLL_2FG |
+					   LIBINPUT_CONFIG_SCROLL_EDGE |
+					   LIBINPUT_CONFIG_SCROLL_ON_BUTTON_DOWN |
+					   LIBINPUT_CONFIG_SCROLL_CIRCULAR))
 		return LIBINPUT_CONFIG_STATUS_INVALID;
-	}
 
 	if ((libinput_device_config_scroll_get_methods(device) & method) != method)
 		return LIBINPUT_CONFIG_STATUS_UNSUPPORTED;
@@ -5065,6 +5062,106 @@ libinput_device_config_momentum_get_min_velocity(struct libinput_device *device)
 		return 0.0;
 
 	return device->config.scroll_method->momentum.get_min_velocity(device);
+}
+
+LIBINPUT_EXPORT enum libinput_config_status
+libinput_device_config_momentum_set_decay_curve(struct libinput_device *device,
+						double exponent)
+{
+	if (exponent <= 0.0 || !isfinite(exponent))
+		return LIBINPUT_CONFIG_STATUS_INVALID;
+
+	if (!libinput_device_config_momentum_is_available(device))
+		return LIBINPUT_CONFIG_STATUS_UNSUPPORTED;
+
+	return device->config.scroll_method->momentum.set_decay_curve(device,
+								      exponent);
+}
+
+LIBINPUT_EXPORT double
+libinput_device_config_momentum_get_decay_curve(struct libinput_device *device)
+{
+	if (!libinput_device_config_momentum_is_available(device))
+		return 0.0;
+
+	return device->config.scroll_method->momentum.get_decay_curve(device);
+}
+
+LIBINPUT_EXPORT enum libinput_config_status
+libinput_device_config_scroll_set_two_finger_speed(struct libinput_device *device,
+						   double multiplier)
+{
+	if (multiplier <= 0.0 || !isfinite(multiplier))
+		return LIBINPUT_CONFIG_STATUS_INVALID;
+
+	if (!device->config.scroll_method ||
+	    !device->config.scroll_method->scroll_speed.set_two_finger_speed)
+		return LIBINPUT_CONFIG_STATUS_UNSUPPORTED;
+
+	return device->config.scroll_method->scroll_speed.set_two_finger_speed(
+		device, multiplier);
+}
+
+LIBINPUT_EXPORT double
+libinput_device_config_scroll_get_two_finger_speed(struct libinput_device *device)
+{
+	if (!device->config.scroll_method ||
+	    !device->config.scroll_method->scroll_speed.get_two_finger_speed)
+		return 0.0;
+
+	return device->config.scroll_method->scroll_speed.get_two_finger_speed(
+		device);
+}
+
+LIBINPUT_EXPORT enum libinput_config_status
+libinput_device_config_scroll_set_edge_speed(struct libinput_device *device,
+					     double multiplier)
+{
+	if (multiplier <= 0.0 || !isfinite(multiplier))
+		return LIBINPUT_CONFIG_STATUS_INVALID;
+
+	if (!device->config.scroll_method ||
+	    !device->config.scroll_method->scroll_speed.set_edge_speed)
+		return LIBINPUT_CONFIG_STATUS_UNSUPPORTED;
+
+	return device->config.scroll_method->scroll_speed.set_edge_speed(
+		device, multiplier);
+}
+
+LIBINPUT_EXPORT double
+libinput_device_config_scroll_get_edge_speed(struct libinput_device *device)
+{
+	if (!device->config.scroll_method ||
+	    !device->config.scroll_method->scroll_speed.get_edge_speed)
+		return 0.0;
+
+	return device->config.scroll_method->scroll_speed.get_edge_speed(device);
+}
+
+LIBINPUT_EXPORT enum libinput_config_status
+libinput_device_config_scroll_set_circular_speed(struct libinput_device *device,
+						 double multiplier)
+{
+	if (multiplier <= 0.0 || !isfinite(multiplier))
+		return LIBINPUT_CONFIG_STATUS_INVALID;
+
+	if (!device->config.scroll_method ||
+	    !device->config.scroll_method->scroll_speed.set_circular_speed)
+		return LIBINPUT_CONFIG_STATUS_UNSUPPORTED;
+
+	return device->config.scroll_method->scroll_speed.set_circular_speed(
+		device, multiplier);
+}
+
+LIBINPUT_EXPORT double
+libinput_device_config_scroll_get_circular_speed(struct libinput_device *device)
+{
+	if (!device->config.scroll_method ||
+	    !device->config.scroll_method->scroll_speed.get_circular_speed)
+		return 0.0;
+
+	return device->config.scroll_method->scroll_speed.get_circular_speed(
+		device);
 }
 
 LIBINPUT_EXPORT int

@@ -17,3 +17,14 @@ MatchName=*My Touchpad*
 AttrPointerMomentumEnabled=1
 AttrPointerMomentumStrength=150
 AttrPointerMomentumMinVelocity=120
+
+[Example: advanced tuning, not in the GUI]
+MatchName=*SynPS/2 Synaptics TouchPad
+AttrCircularScrollEnabled=1
+AttrPointerMomentumEnabled=1
+# Momentum decay shape: <1 stops sharply, >1 coasts longer (0.25-4.0)
+AttrPointerMomentumDecayCurve=1.5
+# Independent scroll speed per method (0.1-5.0)
+AttrScrollSpeed2FG=1.5
+AttrScrollSpeedEdge=0.8
+AttrScrollSpeedCircular=2.0

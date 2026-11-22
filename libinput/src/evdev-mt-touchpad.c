@@ -107,6 +107,33 @@ tp_filter_scroll(struct tp_dispatch *tp,
 				      FILTER_SCROLL_TYPE_FINGER);
 }
 
+/*
+ * Apply a per-method scroll speed multiplier.
+ *
+ * The pointer filter produces one scale for all finger scrolling; these
+ * let each method be tuned separately without duplicating the filter.
+ */
+static inline struct normalized_coords
+tp_scroll_apply_speed(struct normalized_coords delta, double multiplier)
+{
+	if (multiplier == 1.0)
+		return delta;
+
+	delta.x *= multiplier;
+	delta.y *= multiplier;
+	return delta;
+}
+
+struct normalized_coords
+tp_filter_scroll_speed(struct tp_dispatch *tp,
+		       const struct device_float_coords *unaccelerated,
+		       usec_t time,
+		       double multiplier)
+{
+	return tp_scroll_apply_speed(tp_filter_scroll(tp, unaccelerated, time),
+				     multiplier);
+}
+
 static inline void
 tp_calculate_motion_speed(struct tp_dispatch *tp, struct tp_touch *t, usec_t time)
 {
@@ -3268,6 +3295,16 @@ tp_init_scroll(struct tp_dispatch *tp, struct evdev_device *device)
 	tp->scroll.method = tp_scroll_get_default_method(tp);
 	tp->device->base.config.scroll_method = &tp->scroll.config_method;
 
+	/* Registered here rather than from the circular-scroll init because
+	 * that returns early on devices without circular support, and the
+	 * per-method speeds apply to two-finger and edge scrolling too. */
+	tp_scroll_speed_config_init(tp);
+
+	/* Defaults; the quirk reads below may override them. */
+	tp->scroll.speed.two_finger = 1.0;
+	tp->scroll.speed.edge = 1.0;
+	tp->scroll.speed.circular = 1.0;
+
 	/* Quirk-driven defaults.
 	 *
 	 * These let a user (or a distro) configure the fork's features in
@@ -3281,6 +3318,8 @@ tp_init_scroll(struct tp_dispatch *tp, struct evdev_device *device)
 	bool momentum_enabled;
 	uint32_t strength;
 	double min_velocity;
+	double decay_curve;
+	double speed;
 
 	if (q && quirks_get_bool(q, QUIRK_ATTR_CIRCULAR_SCROLL_ENABLED,
 				 &circular_enabled) &&
@@ -3316,6 +3355,19 @@ tp_init_scroll(struct tp_dispatch *tp, struct evdev_device *device)
 	if (q && quirks_get_double(q, QUIRK_ATTR_POINTER_MOMENTUM_MIN_VELOCITY,
 				   &min_velocity))
 		tp->momentum.min_velocity = min_velocity;
+
+	if (q && quirks_get_double(q, QUIRK_ATTR_POINTER_MOMENTUM_DECAY_CURVE,
+				   &decay_curve))
+		tp->momentum.decay_exponent = decay_curve;
+
+	if (q && quirks_get_double(q, QUIRK_ATTR_SCROLL_SPEED_2FG, &speed))
+		tp->scroll.speed.two_finger = speed;
+
+	if (q && quirks_get_double(q, QUIRK_ATTR_SCROLL_SPEED_EDGE, &speed))
+		tp->scroll.speed.edge = speed;
+
+	if (q && quirks_get_double(q, QUIRK_ATTR_SCROLL_SPEED_CIRCULAR, &speed))
+		tp->scroll.speed.circular = speed;
 
 	/* In mm for touchpads with valid resolution, see tp_init_accel() */
 	tp->device->scroll.threshold = 0.0;

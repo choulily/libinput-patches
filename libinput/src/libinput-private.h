@@ -465,7 +465,29 @@ struct libinput_device_config_scroll_method {
 			struct libinput_device *device,
 			double velocity);
 		double (*get_min_velocity)(struct libinput_device *device);
+		/* Advanced: reshape the decay curve (exponent). */
+		enum libinput_config_status (*set_decay_curve)(
+			struct libinput_device *device,
+			double exponent);
+		double (*get_decay_curve)(struct libinput_device *device);
 	} momentum;
+
+	/* Per-method scroll speed multipliers, 1.0 = normal. Advanced
+	 * settings; not exposed in the GUI. */
+	struct {
+		enum libinput_config_status (*set_two_finger_speed)(
+			struct libinput_device *device,
+			double multiplier);
+		double (*get_two_finger_speed)(struct libinput_device *device);
+		enum libinput_config_status (*set_edge_speed)(
+			struct libinput_device *device,
+			double multiplier);
+		double (*get_edge_speed)(struct libinput_device *device);
+		enum libinput_config_status (*set_circular_speed)(
+			struct libinput_device *device,
+			double multiplier);
+		double (*get_circular_speed)(struct libinput_device *device);
+	} scroll_speed;
 };
 
 struct libinput_device_config_click_method {

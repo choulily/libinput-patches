@@ -1,0 +1,79 @@
+# Maintainer: Lily Chou <lily-develop@outlook.com>
+#
+# KDE System Settings module for the libinput fork's circular scrolling and
+# pointer momentum.
+#
+# Depends on libinput-fork: the module edits settings that only that library
+# understands. Against stock libinput the page would write a quirks file
+# whose attributes the stock parser rejects, which disables the whole quirk
+# database and breaks input system-wide, so the dependency is deliberate
+# and the helper refuses to write in that case.
+#
+# Build from a tarball next to this PKGBUILD:
+#   git archive --prefix=$pkgname-$pkgver/ -o <PKGBUILD dir>/$pkgname-$pkgver.tar.gz HEAD
+# (from the kcm-libinput-fork directory)
+
+pkgname=kcm-libinput-fork
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Touchpad settings for the libinput fork (circular scrolling, pointer momentum)"
+arch=('x86_64')
+url="https://github.com/choulily/libinput-patches"
+license=('GPL-2.0-or-later')
+depends=('libinput-fork' 'qt6-base' 'kcmutils' 'kconfig' 'kconfigwidgets'
+         'ki18n' 'kcoreaddons' 'plasma-desktop')
+makedepends=('cmake' 'extra-cmake-modules' 'python')
+options=('!strip')
+_tarball="kcm-libinput-fork-$pkgver.tar.gz"
+source=("$_tarball")
+sha256sums=('SKIP')
+
+build() {
+	cd "$srcdir/$pkgname-$pkgver"
+	cmake -B build \
+		-DCMAKE_INSTALL_PREFIX=/usr \
+		-DCMAKE_BUILD_TYPE=Release
+	cmake --build build
+}
+
+package() {
+	cd "$srcdir/$pkgname-$pkgver"
+
+	DESTDIR="$pkgdir" cmake --install build
+
+	# The helper needs to be executable and on PATH for the module to find
+	# it via QStandardPaths. It ships with 0755 from the CMake install.
+	test -x "$pkgdir/usr/bin/libinput-fork-apply" || \
+		chmod 755 "$pkgdir/usr/bin/libinput-fork-apply"
+
+	# The KCM shepherds a privileged file through pkexec, so make the
+	# requirement visible in the package metadata rather than failing with
+	# a confusing "not authorized" later.
+	install -Dm644 /dev/stdin "$pkgdir/usr/share/doc/$pkgname/README" <<-EOF
+	${pkgname} ${pkgver}-${pkgrel}
+
+	Adds "Touchpad Gestures (Fork)" to KDE System Settings, under
+	Input Devices.
+
+	It controls circular scrolling (trigger region and scroll distance)
+	and pointer momentum (on/off, strength, minimum flick speed).
+
+	Where the settings are stored
+	  /etc/libinput/local-overrides.quirks
+	      Per-device quirk attributes, written through pkexec.
+	  ~/.config/kcminputrc
+	      ScrollMethod, which selects circular scrolling as a method.
+
+	Both are read by libinput and KWin when a device is opened, so changes
+	take effect on next login or when the touchpad is replugged. The page
+	says so after saving; there is no live apply without a patched
+	compositor.
+
+	Because these are configuration files, they survive package upgrades
+	and reinstalling either package.
+
+	Requires libinput-fork. Without it the helper refuses to write, since
+	an unknown quirk attribute makes libinput reject the entire quirks
+	database.
+	EOF
+}

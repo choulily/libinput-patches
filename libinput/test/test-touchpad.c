@@ -1322,21 +1322,30 @@ touchpad_circular_scroll_sum_vertical(struct libinput *li)
 
 	libinput_dispatch(li);
 	while ((event = libinput_get_event(li)) != NULL) {
-		enum libinput_event_type type = libinput_event_get_type(event);
-		struct libinput_event_pointer *p =
-			libinput_event_get_pointer_event(event);
+		const enum libinput_event_type type =
+			libinput_event_get_type(event);
 
-		if (type == LIBINPUT_EVENT_POINTER_SCROLL_FINGER &&
-		    libinput_event_pointer_has_axis(
-			    p,
-			    LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL)) {
-			total += libinput_event_pointer_get_scroll_value(
-				p,
-				LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL);
-			nevents++;
-		} else if (type == LIBINPUT_EVENT_POINTER_AXIS) {
-			litest_assert_enum_eq(libinput_event_pointer_get_axis_source(p),
-					      LIBINPUT_POINTER_AXIS_SOURCE_FINGER);
+		/* Only fetch the pointer view for actual pointer events.
+		 * Gestures and other types can be queued alongside them and
+		 * must not be reinterpreted. */
+		if (type == LIBINPUT_EVENT_POINTER_SCROLL_FINGER ||
+		    type == LIBINPUT_EVENT_POINTER_AXIS) {
+			struct libinput_event_pointer *p =
+				libinput_event_get_pointer_event(event);
+
+			if (type == LIBINPUT_EVENT_POINTER_SCROLL_FINGER) {
+				if (libinput_event_pointer_has_axis(
+					    p, LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL)) {
+					total += libinput_event_pointer_get_scroll_value(
+						p,
+						LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL);
+					nevents++;
+				}
+			} else {
+				litest_assert_enum_eq(
+					libinput_event_pointer_get_axis_source(p),
+					LIBINPUT_POINTER_AXIS_SOURCE_FINGER);
+			}
 		}
 		libinput_event_destroy(event);
 	}
@@ -1579,6 +1588,149 @@ START_TEST(touchpad_circular_scroll_method_change)
 	litest_touch_up(dev, 0);
 
 	litest_assert_double_ne(touchpad_circular_scroll_sum_vertical(li), 0.0);
+}
+END_TEST
+
+START_TEST(touchpad_circular_scroll_combined_with_2fg)
+{
+	struct litest_device *dev = litest_current_device();
+	struct libinput_device *device = dev->libinput_device;
+	struct libinput *li = dev->libinput;
+
+	if (!libinput_device_config_circular_scroll_is_available(device))
+		return LITEST_NOT_APPLICABLE;
+	if (!(libinput_device_config_scroll_get_methods(device) &
+	      LIBINPUT_CONFIG_SCROLL_2FG))
+		return LITEST_NOT_APPLICABLE;
+
+	litest_disable_tap(device);
+
+	/* Both methods at once. Circular claims single-finger touches in
+	 * the trigger region, two-finger scroll claims pairs, and neither
+	 * disturbs the other. */
+	litest_assert_config(libinput_device_config_scroll_set_method(
+		device,
+		LIBINPUT_CONFIG_SCROLL_2FG | LIBINPUT_CONFIG_SCROLL_CIRCULAR));
+	litest_assert_enum_eq(
+		libinput_device_config_scroll_get_method(device),
+		(unsigned)(LIBINPUT_CONFIG_SCROLL_2FG |
+			   LIBINPUT_CONFIG_SCROLL_CIRCULAR));
+
+	litest_drain_events(li);
+
+	/* One finger on the edge scrolls. */
+	litest_touch_down(dev, 0, 90, 40);
+	litest_touch_move_to(dev, 0, 90, 40, 50, 10, 10);
+	litest_touch_up(dev, 0);
+	litest_assert_double_ne(touchpad_circular_scroll_sum_vertical(li), 0.0);
+
+	/* Two fingers, starting away from the trigger region, scroll by
+	 * two-finger motion. The assertion is just that scroll events
+	 * arrive; direction and magnitude are covered elsewhere. */
+	litest_touch_down(dev, 0, 40, 30);
+	litest_touch_down(dev, 1, 60, 30);
+	litest_touch_move_two_touches(dev, 40, 30, 60, 30, 0, 15, 10);
+	litest_touch_up(dev, 1);
+	litest_touch_up(dev, 0);
+
+	litest_dispatch(li);
+	litest_assert_double_ne(touchpad_circular_scroll_sum_vertical(li), 0.0);
+
+	/* Back to a single method; combinations must not stick. */
+	litest_assert_config(libinput_device_config_scroll_set_method(
+		device, LIBINPUT_CONFIG_SCROLL_CIRCULAR));
+	litest_assert_enum_eq(libinput_device_config_scroll_get_method(device),
+			      LIBINPUT_CONFIG_SCROLL_CIRCULAR);
+}
+END_TEST
+
+START_TEST(touchpad_scroll_method_combination_invalid)
+{
+	struct litest_device *dev = litest_current_device();
+	struct libinput_device *device = dev->libinput_device;
+
+	/* Unknown bits are still rejected. */
+	litest_assert_enum_eq(
+		libinput_device_config_scroll_set_method(device,
+							 (enum libinput_config_scroll_method)0x4000),
+		LIBINPUT_CONFIG_STATUS_INVALID);
+
+	/* A combination containing an unsupported method is unsupported,
+	 * not silently truncated. */
+	litest_assert_enum_eq(
+		libinput_device_config_scroll_set_method(
+			device,
+			(enum libinput_config_scroll_method)(
+				LIBINPUT_CONFIG_SCROLL_CIRCULAR |
+				LIBINPUT_CONFIG_SCROLL_ON_BUTTON_DOWN)),
+		LIBINPUT_CONFIG_STATUS_UNSUPPORTED);
+}
+END_TEST
+
+START_TEST(touchpad_advanced_scroll_settings)
+{
+	struct litest_device *dev = litest_current_device();
+	struct libinput_device *device = dev->libinput_device;
+
+	if (!libinput_device_config_momentum_is_available(device))
+		return LITEST_NOT_APPLICABLE;
+
+	/* Decay curve: default 1.0, clamped to [0.25, 4.0]. */
+	litest_assert_double_eq(
+		libinput_device_config_momentum_get_decay_curve(device), 1.0);
+	litest_assert_config(
+		libinput_device_config_momentum_set_decay_curve(device, 2.5));
+	litest_assert_double_eq(
+		libinput_device_config_momentum_get_decay_curve(device), 2.5);
+	litest_assert_config(
+		libinput_device_config_momentum_set_decay_curve(device, 100.0));
+	litest_assert_double_eq(
+		libinput_device_config_momentum_get_decay_curve(device), 4.0);
+	litest_assert_enum_eq(
+		libinput_device_config_momentum_set_decay_curve(device, 0.0),
+		LIBINPUT_CONFIG_STATUS_INVALID);
+	litest_assert_config(
+		libinput_device_config_momentum_set_decay_curve(device, 1.0));
+
+	/* Per-method scroll speed: default 1.0, clamped to [0.1, 5.0]. */
+	litest_assert_double_eq(
+		libinput_device_config_scroll_get_two_finger_speed(device), 1.0);
+	litest_assert_double_eq(
+		libinput_device_config_scroll_get_edge_speed(device), 1.0);
+	litest_assert_double_eq(
+		libinput_device_config_scroll_get_circular_speed(device), 1.0);
+
+	litest_assert_config(
+		libinput_device_config_scroll_set_two_finger_speed(device, 2.0));
+	litest_assert_double_eq(
+		libinput_device_config_scroll_get_two_finger_speed(device), 2.0);
+
+	litest_assert_config(
+		libinput_device_config_scroll_set_edge_speed(device, 0.5));
+	litest_assert_double_eq(
+		libinput_device_config_scroll_get_edge_speed(device), 0.5);
+
+	litest_assert_config(
+		libinput_device_config_scroll_set_circular_speed(device, 3.0));
+	litest_assert_double_eq(
+		libinput_device_config_scroll_get_circular_speed(device), 3.0);
+
+	/* Clamping, and rejection of nonsense. */
+	litest_assert_config(
+		libinput_device_config_scroll_set_edge_speed(device, 99.0));
+	litest_assert_double_eq(
+		libinput_device_config_scroll_get_edge_speed(device), 5.0);
+	litest_assert_enum_eq(
+		libinput_device_config_scroll_set_edge_speed(device, -1.0),
+		LIBINPUT_CONFIG_STATUS_INVALID);
+
+	/* Restore, so later tests are unaffected. */
+	litest_assert_config(
+		libinput_device_config_scroll_set_two_finger_speed(device, 1.0));
+	litest_assert_config(
+		libinput_device_config_scroll_set_edge_speed(device, 1.0));
+	litest_assert_config(
+		libinput_device_config_scroll_set_circular_speed(device, 1.0));
 }
 END_TEST
 
@@ -8168,6 +8320,11 @@ TEST_COLLECTION(touchpad)
 	litest_add(touchpad_circular_scroll_trigger_region, LITEST_TOUCHPAD, LITEST_SINGLE_TOUCH | LITEST_SEMI_MT | LITEST_WACOM_FINGER | LITEST_CIRCULAR_TOUCHPAD);
 	litest_add(touchpad_circular_scroll_distance_scaling, LITEST_TOUCHPAD, LITEST_SINGLE_TOUCH | LITEST_SEMI_MT | LITEST_WACOM_FINGER | LITEST_CIRCULAR_TOUCHPAD);
 	litest_add(touchpad_circular_scroll_method_change, LITEST_TOUCHPAD, LITEST_SINGLE_TOUCH | LITEST_SEMI_MT | LITEST_WACOM_FINGER | LITEST_CIRCULAR_TOUCHPAD);
+
+	litest_add(touchpad_circular_scroll_combined_with_2fg, LITEST_TOUCHPAD, LITEST_SINGLE_TOUCH | LITEST_SEMI_MT | LITEST_WACOM_FINGER | LITEST_CIRCULAR_TOUCHPAD);
+	litest_add(touchpad_scroll_method_combination_invalid, LITEST_TOUCHPAD, LITEST_ANY);
+
+	litest_add(touchpad_advanced_scroll_settings, LITEST_TOUCHPAD, LITEST_ANY);
 
 	litest_add(touchpad_momentum_config, LITEST_TOUCHPAD, LITEST_ANY);
 	litest_add(touchpad_momentum_after_flick, LITEST_TOUCHPAD, LITEST_SINGLE_TOUCH | LITEST_WACOM_FINGER | LITEST_CIRCULAR_TOUCHPAD);

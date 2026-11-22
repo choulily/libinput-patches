@@ -402,7 +402,7 @@ tp_circular_scroll_handle_state(struct tp_dispatch *tp, usec_t time)
 {
 	struct tp_touch *t;
 
-	if (tp->scroll.method != LIBINPUT_CONFIG_SCROLL_CIRCULAR)
+	if (!(tp->scroll.method & LIBINPUT_CONFIG_SCROLL_CIRCULAR))
 		return;
 
 	tp_for_each_touch(tp, t) {
@@ -466,7 +466,7 @@ tp_circular_scroll_post_events(struct tp_dispatch *tp, usec_t time)
 {
 	struct tp_touch *t;
 
-	if (tp->scroll.method != LIBINPUT_CONFIG_SCROLL_CIRCULAR)
+	if (!(tp->scroll.method & LIBINPUT_CONFIG_SCROLL_CIRCULAR))
 		return 0;
 
 	if (tp->nfingers_down != 1)
@@ -528,7 +528,8 @@ tp_circular_scroll_post_events(struct tp_dispatch *tp, usec_t time)
 		 * independent of how far from the centre the finger is.
 		 * That is what makes small circles scroll faster: the
 		 * same finger distance covers more angle. */
-		normalized.y = steps * CIRCULAR_SCROLL_STEP_DISTANCE;
+		normalized.y = steps * CIRCULAR_SCROLL_STEP_DISTANCE *
+			       tp->scroll.speed.circular;
 
 		evdev_notify_axis_finger(
 			tp->device,
@@ -585,7 +586,7 @@ tp_circular_scroll_is_active(const struct tp_dispatch *tp)
 bool
 tp_circular_scroll_touch_active(const struct tp_dispatch *tp, const struct tp_touch *t)
 {
-	if (tp->scroll.method != LIBINPUT_CONFIG_SCROLL_CIRCULAR)
+	if (!(tp->scroll.method & LIBINPUT_CONFIG_SCROLL_CIRCULAR))
 		return true; /* touch is eligible for normal pointer motion */
 
 	/* Only single-finger touches can be owned by circular scroll.

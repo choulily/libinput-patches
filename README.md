@@ -62,6 +62,14 @@ follows `xf86-input-synaptics` rather than inventing new behaviour:
 stop. Only starts from pointer motion, never from a scroll or gesture
 release, and stops on any new touch, button or suspend.
 
+**Combined scroll methods** — scroll methods are a bitmask, so two-finger and
+circular scrolling can both be active. They address different fingers, so
+they do not conflict.
+
+**Advanced tuning** (API and quirks only, not in the GUI): momentum decay
+curve, and independent scroll speed for each of two-finger, edge and
+circular scrolling.
+
 Both are opt-in, except on the ThinkPad generation that shipped circular
 scrolling in its Windows driver (T60 through T440p, via a quirk).
 

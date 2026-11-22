@@ -76,6 +76,41 @@ libinput_device_config_momentum_set_min_velocity(device, 120.0);
 Momentum is available on touchpads, trackpoints and pointing sticks. It is off
 by default.
 
+## Combining scroll methods
+
+Scroll methods are a bitmask, not an exclusive choice, so two-finger and
+circular scrolling can be enabled together:
+
+```c
+libinput_device_config_scroll_set_method(device,
+        LIBINPUT_CONFIG_SCROLL_2FG | LIBINPUT_CONFIG_SCROLL_CIRCULAR);
+```
+
+They address different fingers — circular latches single-finger touches in
+the trigger region, two-finger claims pairs — so both work at once. Any
+combination of the supported methods is accepted; a combination containing
+an unsupported method returns `LIBINPUT_CONFIG_STATUS_UNSUPPORTED` rather
+than being silently truncated.
+
+## Advanced settings
+
+These are deliberately *not* in the GUI. They are reachable through the API
+and through quirk attributes:
+
+| Setting | Quirk attribute | API | Range |
+|---|---|---|---|
+| Momentum decay curve | `AttrPointerMomentumDecayCurve` | `libinput_device_config_momentum_set_decay_curve()` | 0.25–4.0 |
+| Two-finger scroll speed | `AttrScrollSpeed2FG` | `libinput_device_config_scroll_set_two_finger_speed()` | 0.1–5.0 |
+| Edge scroll speed | `AttrScrollSpeedEdge` | `libinput_device_config_scroll_set_edge_speed()` | 0.1–5.0 |
+| Circular scroll speed | `AttrScrollSpeedCircular` | `libinput_device_config_scroll_set_circular_speed()` | 0.1–5.0 |
+
+The decay curve reshapes the momentum falloff rather than its duration:
+below 1 stops more sharply, above 1 keeps a little speed longer at the tail.
+
+The per-method speeds scale the scroll delta *after* the pointer filter, so
+tuning one method leaves pointer motion and the others untouched — which is
+the point of having them separately rather than one global scroll factor.
+
 ## ThinkPad defaults
 
 The T60 through T440p generation (and the contemporary R/X/Z/W/L series) shipped

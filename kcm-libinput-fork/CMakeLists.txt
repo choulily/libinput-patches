@@ -51,7 +51,7 @@ install(FILES kcm_libinputfork.desktop
     DESTINATION ${KDE_INSTALL_APPDIR}
 )
 
-install(FILES src/libinputfork-kcm.json
+install(FILES src/kcm_libinputfork.json
     DESTINATION ${KDE_INSTALL_DATADIR}/plasma/kcms/systemsettings
 )
 

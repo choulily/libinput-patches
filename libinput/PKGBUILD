@@ -1,15 +1,26 @@
 # Maintainer: Lily Chou <lily-develop@outlook.com>
 #
-# libinput with Synaptics-style circular scrolling and cursor momentum.
+# libinput with Synaptics-style circular scrolling and pointer momentum.
 #
-# This package REPLACES the stock libinput, so it must also provide the
-# files libinput-udev and libinput-docs normally ship. Otherwise the next
-# `pacman -Syu` sees a missing/foreign dependency on libinput and either
-# reinstalls stock libinput over this one or breaks the session.
+# REPLACES the stock Arch libinput packages. Arch splits libinput into
+# libinput / libinput-udev / libinput-docs; anything depending on those
+# would otherwise pull stock libinput back in on the next upgrade and
+# silently remove the features. So this package provides all three and
+# ships their files.
 #
-# Settings live in /etc/libinput/local-overrides.quirks and
-# ~/.config/kcminputrc, which are configuration and therefore untouched by
-# upgrades and by reinstall of this package.
+# Settings are NOT part of this package:
+#   /etc/libinput/local-overrides.quirks   (per-device settings)
+#   ~/.config/kcminputrc                   (ScrollMethod)
+# Both are configuration, so upgrading or reinstalling this package leaves
+# them untouched.
+#
+# Building: this PKGBUILD expects a source tarball next to it, named
+# $_tarball. Create one from the repository root with:
+#
+#   git archive --prefix=libinput-fork-$pkgver/ -o PKGBUILD/libinput-fork-$pkgver.tar.gz HEAD
+#
+# Nothing here ever writes into the source tree, so a failed build cannot
+# damage a checkout.
 
 pkgname=libinput-fork
 pkgver=1.32.0
@@ -19,98 +30,74 @@ arch=('x86_64')
 url="https://github.com/choulily/libinput-patches"
 license=('MIT')
 depends=('libevdev' 'libwacom' 'mtdev' 'systemd-libs' 'glib2')
-makedepends=('meson' 'ninja' 'git' 'python' 'pkgconf' 'rsync')
-# Provide everything the stock split packages provide, so nothing depends
-# on libinput and drags it back in.
-provides=('libinput' 'libinput-udev' 'libinput-docs')
-conflicts=('libinput' 'libinput-udev' 'libinput-docs')
-replaces=('libinput' 'libinput-udev')
+makedepends=('meson' 'ninja' 'git' 'python' 'pkgconf')
+# libinput-tools ships the libinput(1) CLI and its man pages, which this
+# package also installs; without conflicting with it, pacman refuses the
+# transaction on file overlap.
+provides=('libinput' 'libinput-udev' 'libinput-docs' 'libinput-tools')
+conflicts=('libinput' 'libinput-udev' 'libinput-docs' 'libinput-tools')
+replaces=('libinput' 'libinput-udev' 'libinput-tools')
 options=('debug')
 
-# Build from the tagged source tree that lives next to this PKGBUILD when
-# building locally, or from a clone when used from the AUR.
-_source_dir="libinput"
-
-prepare() {
-	local candidate=""
-
-	# Resolve the source tree once, in priority order:
-	#   1. a tree sitting next to this PKGBUILD (pkg/../libinput)
-	#   2. a tree inside this PKGBUILD's directory
-	#   3. the local fork checkout, by absolute path
-	for c in "$startdir/../libinput" "$startdir/libinput" \
-		 "$startdir" "/home/lily/Projects/libinput"; do
-		if [[ -f "$c/meson.build" ]] && [[ -d "$c/src" ]]; then
-			candidate="$c"
-			break
-		fi
-	done
-
-	if [[ -n "$candidate" ]]; then
-		rm -rf "$srcdir/$_source_dir"
-		mkdir -p "$srcdir/$_source_dir"
-		# Only skip build outputs and VCS metadata. Do NOT exclude
-		# "src" - that is libinput's own source directory.
-		rsync -a \
-			--exclude='.git' \
-			--exclude='/build' \
-			--exclude='/*.pkg.tar.*' \
-			"$candidate/" "$srcdir/$_source_dir/"
-	else
-		git clone --depth 1 \
-			"${_giturl:-https://github.com/choulily/libinput-patches.git}" \
-			"$srcdir/$_source_dir"
-	fi
-}
+_tarball="libinput-fork-$pkgver.tar.gz"
+source=("$_tarball")
+sha256sums=('SKIP')
 
 build() {
-	local _builddir="$srcdir/$_source_dir"
+	cd "$srcdir/$pkgname-$pkgver"
 
-	# Match Arch's stock libinput option set so behaviour differs only in
-	# the fork's two features.
-	arch-meson "$_builddir" build \
+	mkdir -p build
+	arch-meson . build \
 		-Ddocumentation=false \
 		-Dtests=false \
 		-Ddebug-gui=false \
 		-Dlibwacom=true \
-		-Dudev-dir=/usr/lib/udev \
-		--prefix=/usr
-
+		-Dudev-dir=/usr/lib/udev
 	ninja -C build
 }
 
 package() {
-	local _builddir="$srcdir/$_source_dir"
+	cd "$srcdir/$pkgname-$pkgver"
 
 	DESTDIR="$pkgdir" ninja -C build install
 
-	# Empty directory the stock package also creates; some tools expect it.
+	# The stock package creates this empty directory; tools expect it.
 	install -dm755 "$pkgdir/etc/libinput"
 
-	# Ship a commented example so users can copy it into
-	# /etc/libinput/local-overrides.quirks. A file with only comments is
-	# not a valid quirk database, so it lives in the doc dir, not in /usr/share/libinput.
-	install -Dm644 "$_builddir/examples/fork-quirks-example.quirks" \
+	# A valid quirk database cannot contain a section with only comments,
+	# so the example lives in the doc directory rather than
+	# /usr/share/libinput where libinput would try to parse it.
+	install -Dm644 examples/fork-quirks-example.quirks \
 		"$pkgdir/usr/share/doc/$pkgname/fork-quirks-example.quirks"
 
-	# Record what this package is, so `pacman -Qi` makes the substitution
-	# obvious months later.
 	install -Dm644 /dev/stdin "$pkgdir/usr/share/doc/$pkgname/README" <<-EOF
 	${pkgname} ${pkgver}-${pkgrel}
 
-	This package replaces the stock Arch libinput packages
-	(libinput, libinput-udev, libinput-docs) and provides their files.
-	Keep it installed or the touchpad loses circular scrolling and
-	pointer momentum.
+	This package replaces libinput, libinput-udev and libinput-docs and
+	provides their files. Keep it installed or the touchpad loses
+	circular scrolling and pointer momentum.
 
-	Settings:
-	  /etc/libinput/local-overrides.quirks   (system, needs root)
-	  ~/.config/kcminputrc                   (per user, ScrollMethod)
+	What it adds
+	  Circular scrolling: draw circles on the edge to scroll. Follows
+	  xf86-input-synaptics: latched per touch, distance from the angle
+	  travelled, so small circles scroll faster.
 
-	GUI: System Settings -> Input Devices -> Touchpad.
-	       (the module talks to these files, not to a patched KWin)
+	  Pointer momentum: a fast flick keeps the cursor gliding.
 
-	Circular scrolling is a scroll method (LIBINPUT_CONFIG_SCROLL_CIRCULAR,
-	value 8), so KWin selects it from kcminputrc without patching.
+	Settings
+	  /etc/libinput/local-overrides.quirks   system, needs root
+	  ~/.config/kcminputrc                   per user (ScrollMethod)
+
+	  KDE: install kcm-libinput-fork, then System Settings ->
+	       Input Devices -> Touchpad Gestures (Fork).
+
+	  Other desktops: write the quirk file directly, or on sway use
+	  "scroll_method circular". See fork-quirks-example.quirks.
+
+	Circular scrolling is a scroll method (value 8), which unpatched KWin
+	already applies from kcminputrc. No compositor patch is needed.
+
+	Upgrading libinput upstream does not overwrite this package, because
+	it provides the same package names.
 	EOF
 }

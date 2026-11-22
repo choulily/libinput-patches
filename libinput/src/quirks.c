@@ -343,6 +343,14 @@ quirk_get_name(enum quirk q)
 		return "AttrPointerMomentumStrength";
 	case QUIRK_ATTR_POINTER_MOMENTUM_MIN_VELOCITY:
 		return "AttrPointerMomentumMinVelocity";
+	case QUIRK_ATTR_POINTER_MOMENTUM_DECAY_CURVE:
+		return "AttrPointerMomentumDecayCurve";
+	case QUIRK_ATTR_SCROLL_SPEED_2FG:
+		return "AttrScrollSpeed2FG";
+	case QUIRK_ATTR_SCROLL_SPEED_EDGE:
+		return "AttrScrollSpeedEdge";
+	case QUIRK_ATTR_SCROLL_SPEED_CIRCULAR:
+		return "AttrScrollSpeedCircular";
 	case QUIRK_ATTR_THUMB_SIZE_THRESHOLD:
 		return "AttrThumbSizeThreshold";
 	case QUIRK_ATTR_MSC_TIMESTAMP:
@@ -931,6 +939,31 @@ parse_attr(struct quirks_context *ctx,
 		if (!safe_atod(value, &d))
 			goto out;
 		if (d < 0.0 || d > 2000.0)
+			goto out;
+		p->type = PT_DOUBLE;
+		p->value.d = d;
+		rc = true;
+	} else if (streq(key, quirk_get_name(QUIRK_ATTR_POINTER_MOMENTUM_DECAY_CURVE))) {
+		p->id = QUIRK_ATTR_POINTER_MOMENTUM_DECAY_CURVE;
+		if (!safe_atod(value, &d))
+			goto out;
+		if (d < 0.25 || d > 4.0)
+			goto out;
+		p->type = PT_DOUBLE;
+		p->value.d = d;
+		rc = true;
+	} else if (streq(key, quirk_get_name(QUIRK_ATTR_SCROLL_SPEED_2FG)) ||
+		   streq(key, quirk_get_name(QUIRK_ATTR_SCROLL_SPEED_EDGE)) ||
+		   streq(key, quirk_get_name(QUIRK_ATTR_SCROLL_SPEED_CIRCULAR))) {
+		if (streq(key, quirk_get_name(QUIRK_ATTR_SCROLL_SPEED_2FG)))
+			p->id = QUIRK_ATTR_SCROLL_SPEED_2FG;
+		else if (streq(key, quirk_get_name(QUIRK_ATTR_SCROLL_SPEED_EDGE)))
+			p->id = QUIRK_ATTR_SCROLL_SPEED_EDGE;
+		else
+			p->id = QUIRK_ATTR_SCROLL_SPEED_CIRCULAR;
+		if (!safe_atod(value, &d))
+			goto out;
+		if (d < 0.1 || d > 5.0)
 			goto out;
 		p->type = PT_DOUBLE;
 		p->value.d = d;

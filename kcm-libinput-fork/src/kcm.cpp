@@ -23,6 +23,7 @@
 #include "kcm.h"
 
 #include <QComboBox>
+#include <algorithm>
 #include <QDBusConnection>
 #include <QDBusInterface>
 #include <QDBusReply>
@@ -42,7 +43,7 @@
 
 #include "ui_main.h"
 
-K_PLUGIN_CLASS_WITH_JSON(LibinputForkKcm, "libinputfork-kcm.json")
+K_PLUGIN_CLASS_WITH_JSON(LibinputForkKcm, "kcm_libinputfork.json")
 
 namespace {
 // libinput's enum libinput_config_scroll_method.
@@ -61,6 +62,41 @@ kwinObjectPath(const QString &sysName)
 {
 	return QStringLiteral("/org/kde/KWin/InputDevice/") + sysName;
 }
+
+/*
+ * Is the installed libinput the fork?
+ *
+ * The fork's public API is the only reliable signal: circular scrolling is
+ * selected through the ordinary ScrollMethod key, so neither KWin nor the
+ * scroll-method bitmask distinguishes the two libraries.
+ *
+ * Reading the library is cheap and needs no privileges. The result is
+ * cached because the library cannot change while the session runs.
+ */
+bool
+libinputForkPresent()
+{
+	static const bool present = [] {
+		const QStringList candidates = {
+			QStringLiteral("/usr/lib/libinput.so.10"),
+			QStringLiteral("/usr/lib/x86_64-linux-gnu/libinput.so.10"),
+			QStringLiteral("/usr/lib64/libinput.so.10"),
+		};
+
+		for (const QString &path : candidates) {
+			QFile lib(path);
+			// Symbols live in the read-only segment near the start;
+			// reading whole multi-megabyte libraries is wasteful.
+			if (!lib.open(QIODevice::ReadOnly))
+				continue;
+			const QByteArray head = lib.read(4 * 1024 * 1024);
+			if (head.contains("libinput_device_config_momentum_is_available"))
+				return true;
+		}
+		return false;
+	}();
+	return present;
+}
 } // namespace
 
 class LibinputForkKcm::Private
@@ -77,11 +113,17 @@ public:
 	struct DeviceInfo {
 		QString sysName;
 		QString name;
+		bool isTouchpad = false;
 		bool supportsCircular = false;
 		bool supportsMomentum = false;
 	};
 
 	QList<DeviceInfo> devices;
+
+	/* Advanced quirk attributes are not in the GUI. They are read from
+	 * the existing section and written back unchanged, so editing the
+	 * page does not discard values set by hand. */
+	QHash<QString, QString> advancedValues;
 
 	void populateDevices();
 	bool queryDevice(const QString &sysName, DeviceInfo *info);
@@ -128,6 +170,14 @@ LibinputForkKcm::Private::populateDevices()
 		if (queryDevice(sysName, &info))
 			devices.append(info);
 	}
+
+	// Touchpads first, then anything else that supports the features. The
+	// list otherwise starts with whichever mouse KWin happened to report
+	// first, which is wrong for a touchpad settings page.
+	std::stable_sort(devices.begin(), devices.end(),
+			 [](const DeviceInfo &a, const DeviceInfo &b) {
+				 return a.isTouchpad && !b.isTouchpad;
+			 });
 }
 
 bool
@@ -151,21 +201,32 @@ LibinputForkKcm::Private::queryDevice(const QString &sysName, DeviceInfo *info)
 	if (!get(QStringLiteral("pointer")).toBool())
 		return false;
 
+	// KWin has no "is touchpad" property. Scroll-method support is the
+	// reliable signal: only touchpads advertise it, mice and trackpoints
+	// do not. Devices without any scroll method are not what this page is
+	// for, so skip them entirely.
+	info->isTouchpad =
+		get(QStringLiteral("supportsScrollTwoFinger")).toBool() ||
+		get(QStringLiteral("supportsScrollEdge")).toBool();
+	if (!info->isTouchpad)
+		return false;
+
 	info->sysName = sysName;
 	info->name = get(QStringLiteral("name")).toString();
 	if (info->name.isEmpty())
 		info->name = sysName;
 
-	// KWin exposes method support as booleans; circular scrolling is the
-	// one the fork adds, so its presence is also what tells us whether the
-	// running libinput is the fork.
-	const QVariant circular =
-		get(QStringLiteral("supportsScrollCircular"));
-	if (circular.isValid()) {
-		forkPresent = true;
-		info->supportsCircular = circular.toBool();
-		info->supportsMomentum = true;
-	}
+	// Whether circular scrolling and momentum are usable depends on the
+	// installed libinput, not on KWin. Unpatched KWin reports the method
+	// bitmask without knowing the circular bit, so asking it would always
+	// say "unsupported". Instead probe the library: only the fork exports
+	// these symbols.
+	if (!libinputForkPresent())
+		return false;
+
+	info->supportsCircular = true;
+	info->supportsMomentum = true;
+	forkPresent = true;
 
 	return true;
 }
@@ -217,6 +278,9 @@ LibinputForkKcm::Private::loadDevice(const DeviceInfo &info)
 				strength = value.toInt();
 			else if (key == QLatin1String("AttrPointerMomentumMinVelocity"))
 				velocity = value.toInt();
+			else if (key.startsWith(QLatin1String("AttrPointerMomentumDecayCurve")) ||
+				 key.startsWith(QLatin1String("AttrScrollSpeed")))
+				advancedValues.insert(key, value);
 		}
 	}
 
@@ -293,6 +357,16 @@ LibinputForkKcm::Private::buildQuirksSection() const
 		    << ui.strengthSlider->value() << "\n";
 		out << "AttrPointerMomentumMinVelocity="
 		    << ui.velocitySlider->value() << "\n";
+	}
+
+	// Advanced values are not in the GUI. Preserve whatever the user set
+	// by hand instead of dropping it when the page saves.
+	for (const QString &key : {QStringLiteral("AttrPointerMomentumDecayCurve"),
+				   QStringLiteral("AttrScrollSpeed2FG"),
+				   QStringLiteral("AttrScrollSpeedEdge"),
+				   QStringLiteral("AttrScrollSpeedCircular")}) {
+		if (advancedValues.contains(key))
+			out << key << '=' << advancedValues.value(key) << '\n';
 	}
 
 	return s;

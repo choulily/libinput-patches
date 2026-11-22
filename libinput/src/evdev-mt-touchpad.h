@@ -493,6 +493,15 @@ struct tp_dispatch {
 			/* Every touch is a trigger, for round pads */
 			bool round_pad;
 		} circular;
+
+		/* Per-method scroll speed multipliers, 1.0 = normal. These
+		 * let two-finger, edge and circular scrolling run at
+		 * different speeds without changing the pointer filter. */
+		struct {
+			double two_finger;
+			double edge;
+			double circular;
+		} speed;
 	} scroll;
 
 	struct {
@@ -501,6 +510,11 @@ struct tp_dispatch {
 		int strength;
 		/* Minimum initial velocity to start momentum */
 		double min_velocity;
+		/* Decay curve exponent. 1.0 is the default exponential
+		 * decay; below 1 the cursor stops sharply, above 1 it
+		 * coasts noticeably longer at the tail. Exposed as an
+		 * advanced setting, not in the GUI. */
+		double decay_exponent;
 
 		/* While a momentum animation is running */
 		struct {
@@ -733,6 +747,12 @@ tp_filter_scroll(struct tp_dispatch *tp,
 		 const struct device_float_coords *unaccelerated,
 		 usec_t time);
 
+struct normalized_coords
+tp_filter_scroll_speed(struct tp_dispatch *tp,
+		       const struct device_float_coords *unaccelerated,
+		       usec_t time,
+		       double multiplier);
+
 bool
 tp_touch_active(const struct tp_dispatch *tp, const struct tp_touch *t);
 
@@ -843,6 +863,8 @@ tp_circular_scroll_touch_active(const struct tp_dispatch *tp, const struct tp_to
 
 void
 tp_circular_scroll_config_init(struct tp_dispatch *tp);
+void
+tp_scroll_speed_config_init(struct tp_dispatch *tp);
 
 void
 tp_momentum_init(struct tp_dispatch *tp);

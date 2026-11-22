@@ -6994,6 +6994,128 @@ libinput_device_config_momentum_get_min_velocity(struct libinput_device *device)
 /**
  * @ingroup config
  *
+ * Set the shape of the momentum decay curve.
+ *
+ * 1.0 is the default exponential decay. Values below 1 make the cursor
+ * stop more sharply; values above 1 keep a little speed for longer, which
+ * reads as a longer coast. This is an advanced setting: the useful range
+ * is roughly 0.25 to 4.0 and it is clamped to that.
+ *
+ * @param device The device to configure
+ * @param exponent The decay curve exponent
+ *
+ * @return A config status code.
+ *
+ * @see libinput_device_config_momentum_get_decay_curve
+ */
+enum libinput_config_status
+libinput_device_config_momentum_set_decay_curve(struct libinput_device *device,
+						double exponent);
+
+/**
+ * @ingroup config
+ *
+ * Get the momentum decay curve exponent. Returns 0 if momentum is not
+ * available.
+ *
+ * @param device The device to configure
+ * @return The decay curve exponent.
+ */
+double
+libinput_device_config_momentum_get_decay_curve(struct libinput_device *device);
+
+/**
+ * @ingroup config
+ *
+ * Set a per-method scroll speed multiplier for two-finger scrolling.
+ *
+ * 1.0 is the device's normal speed. This scales the scroll delta after the
+ * pointer filter, so it does not change pointer motion or the other
+ * scroll methods. Advanced setting, useful range 0.1 to 5.0.
+ *
+ * @param device The device to configure
+ * @param multiplier The speed multiplier
+ *
+ * @return A config status code.
+ *
+ * @see libinput_device_config_scroll_get_two_finger_speed
+ */
+enum libinput_config_status
+libinput_device_config_scroll_set_two_finger_speed(struct libinput_device *device,
+						   double multiplier);
+
+/**
+ * @ingroup config
+ *
+ * Get the two-finger scroll speed multiplier.
+ *
+ * @param device The device to configure
+ * @return The multiplier.
+ */
+double
+libinput_device_config_scroll_get_two_finger_speed(struct libinput_device *device);
+
+/**
+ * @ingroup config
+ *
+ * Set a per-method scroll speed multiplier for edge scrolling.
+ *
+ * @param device The device to configure
+ * @param multiplier The speed multiplier
+ *
+ * @return A config status code.
+ *
+ * @see libinput_device_config_scroll_set_two_finger_speed
+ */
+enum libinput_config_status
+libinput_device_config_scroll_set_edge_speed(struct libinput_device *device,
+					     double multiplier);
+
+/**
+ * @ingroup config
+ *
+ * Get the edge scroll speed multiplier.
+ *
+ * @param device The device to configure
+ * @return The multiplier.
+ */
+double
+libinput_device_config_scroll_get_edge_speed(struct libinput_device *device);
+
+/**
+ * @ingroup config
+ *
+ * Set a per-method scroll speed multiplier for circular scrolling.
+ *
+ * Because circular scrolling derives its delta from the angle travelled,
+ * this scales the resulting scroll distance. It does not change the angle
+ * per step, so the trigger behaviour is unaffected.
+ *
+ * @param device The device to configure
+ * @param multiplier The speed multiplier
+ *
+ * @return A config status code.
+ *
+ * @see libinput_device_config_scroll_set_two_finger_speed
+ */
+enum libinput_config_status
+libinput_device_config_scroll_set_circular_speed(struct libinput_device *device,
+						 double multiplier);
+
+/**
+ * @ingroup config
+ *
+ * Get the circular scroll speed multiplier.
+ *
+ * @param device The device to configure
+ * @return The multiplier.
+ */
+double
+libinput_device_config_scroll_get_circular_speed(struct libinput_device *device);
+
+/**
+ * @ingroup config
+ *
  * Possible states for the disable-while-typing feature.
  */
 enum libinput_config_dwt_state {
