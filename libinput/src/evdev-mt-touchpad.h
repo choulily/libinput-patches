@@ -492,6 +492,14 @@ struct tp_dispatch {
 			enum libinput_config_circular_scroll_trigger trigger;
 			/* Every touch is a trigger, for round pads */
 			bool round_pad;
+			/* Synaptics calls this ChiralMotion and scales the
+			 * output by a gain that differs between "wheel" and
+			 * "page" scroll modes. Defaults from the original
+			 * driver: wheel gain 4, page gain 256. The active one
+			 * is selected below. */
+			double wheel_gain;
+			double page_gain;
+			bool page_mode;
 		} circular;
 
 		/* Per-method scroll speed multipliers, 1.0 = normal. These
@@ -502,6 +510,16 @@ struct tp_dispatch {
 			double edge;
 			double circular;
 		} speed;
+
+		/* Synaptics ScrollingSmoothnessFactor, 1..6. The original
+		 * quantises it and uses it as the master smoothness knob;
+		 * 1 is the smoothest, 6 the most responsive. Mapped onto a
+		 * low-pass factor applied to scroll deltas. */
+		int smoothness;
+
+		/* Low-pass state for the smoothness filter. */
+		struct normalized_coords smoothed;
+		usec_t smooth_time;
 	} scroll;
 
 	struct {

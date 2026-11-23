@@ -92,6 +92,32 @@ combination of the supported methods is accepted; a combination containing
 an unsupported method returns `LIBINPUT_CONFIG_STATUS_UNSUPPORTED` rather
 than being silently truncated.
 
+## Tunings taken from the Windows driver
+
+The momentum and circular-scrolling physics were corrected against the real
+ThinkPad T410 UltraNav driver (6hgx75ww.exe, Synaptics 16.2.19.7); the full
+analysis is in `../ultranav-re/`.
+
+| Attribute | Default | Meaning |
+|---|---|---|
+| `AttrCoastingFriction` | 50 | Constant deceleration, scroll events/s² |
+| `AttrScrollingSmoothnessFactor` | 3 | Master smoothness, clamped 1..6 |
+| `AttrChiralWheelGain` | 4 | Circular scrolling gain, wheel mode |
+| `AttrChiralPageGain` | 256 | Circular scrolling gain, page mode |
+
+The two changes that matter most:
+
+**Momentum uses constant deceleration, not exponential decay.** The original
+(and `xf86-input-synaptics`, which copied it) subtracts a fixed amount from
+the speed every second, so a coast ends in a predictable time with a linear
+tail. Exponential decay is asymptotic — always still moving — which reads as
+an unresponsive drift.
+
+**Momentum only engages above 20 scroll events/second.** The driver's
+documentation calls this the setting "which should prevent you from starting
+coasting unintentionally". Without it, ordinary brisk pointing flung the
+cursor.
+
 ## Advanced settings
 
 These are deliberately *not* in the GUI. They are reachable through the API
@@ -99,7 +125,7 @@ and through quirk attributes:
 
 | Setting | Quirk attribute | API | Range |
 |---|---|---|---|
-| Momentum decay curve | `AttrPointerMomentumDecayCurve` | `libinput_device_config_momentum_set_decay_curve()` | 0.25–4.0 |
+| Momentum decay curve | `AttrPointerMomentumDecayCurve` | `libinput_device_config_momentum_set_decay_curve()` | 0.25–4.0 (maps to friction) |
 | Two-finger scroll speed | `AttrScrollSpeed2FG` | `libinput_device_config_scroll_set_two_finger_speed()` | 0.1–5.0 |
 | Edge scroll speed | `AttrScrollSpeedEdge` | `libinput_device_config_scroll_set_edge_speed()` | 0.1–5.0 |
 | Circular scroll speed | `AttrScrollSpeedCircular` | `libinput_device_config_scroll_set_circular_speed()` | 0.1–5.0 |

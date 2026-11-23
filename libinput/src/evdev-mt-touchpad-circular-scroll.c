@@ -67,6 +67,12 @@
 
 #define CIRCULAR_SCROLL_DEFAULT_STEP_RAD 0.1 /* CircScrollDelta default */
 
+/* ChiralMotion gains, decoded from SynTPEnh.exe. The original scales the
+ * scroll a finger rotation produces by one of these depending on whether
+ * the target scrolls by wheel or by page. */
+#define CIRCULAR_SCROLL_DEFAULT_WHEEL_GAIN 4.0
+#define CIRCULAR_SCROLL_DEFAULT_PAGE_GAIN 256.0
+
 /* Scroll is expressed in normalized (1000dpi) units. One full step
  * produces this many units, which gives roughly a line of scrolling
  * for the default step and matches what 2fg scroll produces for a
@@ -382,6 +388,9 @@ tp_circular_scroll_init(struct tp_dispatch *tp, struct evdev_device *device)
 	tp->scroll.circular.dead_zone_radius_sq = dead_units * dead_units;
 
 	tp->scroll.circular.angle_step = CIRCULAR_SCROLL_DEFAULT_STEP_RAD;
+	tp->scroll.circular.wheel_gain = CIRCULAR_SCROLL_DEFAULT_WHEEL_GAIN;
+	tp->scroll.circular.page_gain = CIRCULAR_SCROLL_DEFAULT_PAGE_GAIN;
+	tp->scroll.circular.page_mode = false;
 	tp->scroll.circular.round_pad =
 		evdev_device_has_model_quirk(device, QUIRK_MODEL_CIRCULAR_TOUCHPAD);
 
@@ -528,7 +537,15 @@ tp_circular_scroll_post_events(struct tp_dispatch *tp, usec_t time)
 		 * independent of how far from the centre the finger is.
 		 * That is what makes small circles scroll faster: the
 		 * same finger distance covers more angle. */
+		/* Original model: one step of rotation produces one
+		 * scroll unit, scaled by the wheel/page gain. Keeping the
+		 * gain as a separate factor preserves the original's feel
+		 * where page-mode scrolling moves much further per step. */
 		normalized.y = steps * CIRCULAR_SCROLL_STEP_DISTANCE *
+			       (tp->scroll.circular.page_mode
+					? tp->scroll.circular.page_gain
+					: tp->scroll.circular.wheel_gain) /
+			       CIRCULAR_SCROLL_DEFAULT_WHEEL_GAIN *
 			       tp->scroll.speed.circular;
 
 		evdev_notify_axis_finger(

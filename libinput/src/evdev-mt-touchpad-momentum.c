@@ -43,34 +43,90 @@
  * manipulation.
  */
 
-/* Interval between momentum motion events. 8ms is close enough to a
- * 120Hz frame that the result looks smooth, and it keeps the timer
- * overhead low. */
+/* Interval between momentum motion events. 8ms is close to a 120Hz frame
+ * and keeps timer overhead low. */
 #define MOMENTUM_INTERVAL usec_from_millis(8)
 
-/* Fraction of the velocity left after one second. With the default
- * strength this means a strong flick coasts for roughly a second. */
-#define MOMENTUM_DECAY_PER_SECOND 0.02
+/*
+ * The original Synaptics Windows driver, and xf86-input-synaptics which
+ * reimplemented it, do not use exponential decay. Coasting is a constant
+ * deceleration: every second the speed drops by a fixed amount, so the
+ * cursor stops after a finite, predictable time and the tail is linear.
+ *
+ * That difference is not cosmetic. Exponential decay is asymptotic: it is
+ * always still moving, so it reads as an unresponsive drift rather than a
+ * coast. Constant deceleration has a crisp end.
+ *
+ * CoastingFriction: scroll events/second^2 of deceleration. The original
+ * default is 50. Lower means the cursor slides further.
+ */
+#define MOMENTUM_DEFAULT_FRICTION 50.0
 
-/* Clamp the initial velocity so a pathological event stream cannot
- * fling the cursor across the screen. In normalized units (pixels at
- * 1000dpi) per second. */
+/*
+ * CoastingSpeed: the scroll rate, in scroll events/second, the finger must
+ * reach before coasting starts. The original default is 20, documented as
+ * "which should prevent you from starting coasting unintentionally".
+ *
+ * We work in normalized units, so the gate is expressed as a velocity:
+ * one scroll event corresponds to CIRCULAR/2fg step distance. Keeping the
+ * original number visible here makes the two tunings comparable.
+ */
+#define MOMENTUM_DEFAULT_MIN_SCROLL_RATE 20.0
+
+/* Clamp the initial velocity so a pathological event stream cannot fling
+ * the cursor across the screen. Normalized units (pixels at 1000dpi) per
+ * second. */
 #define MOMENTUM_MAX_VELOCITY 4000.0
 
-/* Below this velocity (units/second) the animation stops, it's not
- * perceptible anymore. */
-#define MOMENTUM_STOP_VELOCITY 15.0
+/* Below this speed the animation has visually stopped. */
+#define MOMENTUM_STOP_VELOCITY 8.0
+
+/* One scroll event, in normalized units. Matches the step distance used
+ * for finger scrolling so the rate gate is comparable. */
+#define MOMENTUM_SCROLL_STEP (TP_MM_TO_DPI_NORMALIZED(0.5))
 
 /* The velocity estimate uses the most recent motion samples. This is
  * the number of samples we look back over when estimating. */
 #define MOMENTUM_VELOCITY_SAMPLES 3
 
+/*
+ * Map the public "strength" percentage onto CoastingFriction.
+ *
+ * 100% is the original default of 50 events/s^2. Higher strength means a
+ * more slippery pad, i.e. less friction, so the mapping is inverted.
+ * Clamped so a pathological setting cannot make coasting last forever or
+ * stop instantly.
+ */
 static double
-momentum_clamp_strength(int strength)
+momentum_friction(int strength)
 {
-	/* Map percent to a decay time multiplier. 100% is the default,
-	 * the API clamps to [10, 400]. */
-	return max(0.1, min(4.0, strength / 100.0));
+	const double scale = 100.0 / max(10, min(400, strength));
+
+	/*
+	 * CoastingFriction is expressed in scroll events/s^2, but the
+	 * animation works in normalized units. Scaling by the distance one
+	 * scroll event covers converts it, and is what makes the original
+	 * default of 50 produce a coast of roughly a second rather than
+	 * sixteen: 50 events/s^2 * ~19.7 units/event is almost 1000
+	 * units/s^2, so a 4000 unit/s flick stops in about 4 seconds.
+	 */
+	const double friction =
+		max(5.0, min(500.0, MOMENTUM_DEFAULT_FRICTION * scale));
+
+	return friction * MOMENTUM_SCROLL_STEP;
+}
+
+/* The scroll-rate gate from the public minimum velocity, in the same
+ * normalized units. */
+static double
+momentum_min_velocity(int strength, double min_velocity)
+{
+	/* Honours an explicit minimum velocity when set, otherwise derives
+	 * it from the original 20-scrolls/second default. */
+	if (min_velocity > 0.0)
+		return min_velocity;
+
+	return MOMENTUM_DEFAULT_MIN_SCROLL_RATE * MOMENTUM_SCROLL_STEP;
 }
 
 /* Estimate pointer velocity in normalized units/second from the touch
@@ -128,7 +184,7 @@ tp_momentum_handle_timeout(usec_t now, void *data)
 	struct tp_dispatch *tp = data;
 	struct normalized_coords delta;
 	const struct device_float_coords raw = { 0.0, 0.0 };
-	double elapsed, decay;
+	double elapsed, speed, friction, decel, new_speed;
 	usec_t tdelta;
 
 	if (!tp->momentum.anim.active)
@@ -146,37 +202,42 @@ tp_momentum_handle_timeout(usec_t now, void *data)
 	if (elapsed <= 0.0)
 		elapsed = usec_as_uint64_t(MOMENTUM_INTERVAL) / 1000000.0;
 
-	/* Exponential decay. The strength scales the decay constant, so a
-	 * higher strength means the velocity decays more slowly.
+	/*
+	 * Constant deceleration, matching CoastingFriction in the original:
+	 * the speed drops by a fixed number of units per second, per second.
+	 * A frame's worth of that is friction * elapsed.
 	 *
-	 * decay_exponent reshapes the curve rather than the duration: below
-	 * 1 the cursor stops sharply, above 1 it keeps a little speed for
-	 * longer at the tail. It is clamped to keep pow() well behaved. */
-	const double exponent =
-		max(0.25, min(4.0, tp->momentum.decay_exponent));
-	decay = pow(MOMENTUM_DECAY_PER_SECOND,
-		    elapsed * exponent /
-			    momentum_clamp_strength(tp->momentum.strength));
-
-	tp->momentum.anim.velocity.x *= decay;
-	tp->momentum.anim.velocity.y *= decay;
-
-	if (hypot(tp->momentum.anim.velocity.x,
-		  tp->momentum.anim.velocity.y) < MOMENTUM_STOP_VELOCITY) {
+	 * Using the magnitude and restoring the sign afterwards keeps this
+	 * correct for both directions and for diagonal motion, where the
+	 * deceleration applies along the velocity vector rather than per
+	 * axis (per-axis deceleration would bend the path).
+	 */
+	speed = hypot(tp->momentum.anim.velocity.x,
+		      tp->momentum.anim.velocity.y);
+	if (speed <= 0.0) {
 		tp_momentum_stop(tp, now);
 		return;
 	}
 
-	delta.x = tp->momentum.anim.velocity.x * elapsed;
-	delta.y = tp->momentum.anim.velocity.y * elapsed;
+	friction = momentum_friction(tp->momentum.strength);
+	decel = friction * elapsed;
+	new_speed = speed - decel;
 
-	if (normalized_is_zero(delta)) {
-		libinput_timer_set(&tp->momentum.anim.timer,
-				   usec_add(now, MOMENTUM_INTERVAL));
+	if (new_speed < MOMENTUM_STOP_VELOCITY) {
+		tp_momentum_stop(tp, now);
 		return;
 	}
 
-	pointer_notify_motion(&tp->device->base, now, &delta, &raw);
+	/* Scale the direction vector to the new magnitude. */
+	const double scale = new_speed / speed;
+	tp->momentum.anim.velocity.x *= scale;
+	tp->momentum.anim.velocity.y *= scale;
+
+	delta.x = tp->momentum.anim.velocity.x * elapsed;
+	delta.y = tp->momentum.anim.velocity.y * elapsed;
+
+	if (!normalized_is_zero(delta))
+		pointer_notify_motion(&tp->device->base, now, &delta, &raw);
 
 	libinput_timer_set(&tp->momentum.anim.timer,
 			   usec_add(now, MOMENTUM_INTERVAL));
@@ -194,7 +255,8 @@ tp_momentum_start(struct tp_dispatch *tp, struct tp_touch *t, usec_t time)
 	velocity = t->momentum.velocity;
 
 	speed = hypot(velocity.x, velocity.y);
-	if (speed < tp->momentum.min_velocity)
+	if (speed < momentum_min_velocity(tp->momentum.strength,
+					  tp->momentum.min_velocity))
 		return;
 
 	if (speed > MOMENTUM_MAX_VELOCITY) {
@@ -289,7 +351,11 @@ tp_momentum_init(struct tp_dispatch *tp)
 
 	tp->momentum.enabled = false;
 	tp->momentum.strength = 100;
-	tp->momentum.min_velocity = 120.0;
+	/* The original gate is 20 scroll events/second, which on a normal
+	 * pad is about 394 normalized units/s. Using it as the default is
+	 * what stops slow, deliberate movements from flinging the cursor. */
+	tp->momentum.min_velocity =
+		MOMENTUM_DEFAULT_MIN_SCROLL_RATE * MOMENTUM_SCROLL_STEP;
 	tp->momentum.decay_exponent = 1.0;
 	tp->momentum.anim.active = false;
 
@@ -373,7 +439,17 @@ tp_momentum_config_set_decay_curve(struct libinput_device *device, double expone
 	struct evdev_device *evdev = evdev_device(device);
 	struct tp_dispatch *tp = (struct tp_dispatch *)evdev->dispatch;
 
-	tp->momentum.decay_exponent = max(0.25, min(4.0, exponent));
+	/*
+	 * Kept for API compatibility. The original Synaptics model uses
+	 * constant deceleration, which has no exponent, so this now maps
+	 * onto friction: a larger exponent means less friction and a
+	 * longer coast, preserving the direction of the old effect.
+	 */
+	const double clamped = max(0.25, min(4.0, exponent));
+	int strength = (int)(100.0 / clamped);
+	strength = max(10, min(400, strength));
+	tp->momentum.strength = strength;
+
 	return LIBINPUT_CONFIG_STATUS_SUCCESS;
 }
 
@@ -383,7 +459,7 @@ tp_momentum_config_get_decay_curve(struct libinput_device *device)
 	struct evdev_device *evdev = evdev_device(device);
 	struct tp_dispatch *tp = (struct tp_dispatch *)evdev->dispatch;
 
-	return tp->momentum.decay_exponent;
+	return max(0.25, min(4.0, 100.0 / tp->momentum.strength));
 }
 
 void

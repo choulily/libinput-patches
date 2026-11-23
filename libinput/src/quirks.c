@@ -351,6 +351,14 @@ quirk_get_name(enum quirk q)
 		return "AttrScrollSpeedEdge";
 	case QUIRK_ATTR_SCROLL_SPEED_CIRCULAR:
 		return "AttrScrollSpeedCircular";
+	case QUIRK_ATTR_SCROLL_SMOOTHNESS:
+		return "AttrScrollingSmoothnessFactor";
+	case QUIRK_ATTR_COASTING_FRICTION:
+		return "AttrCoastingFriction";
+	case QUIRK_ATTR_CHIRAL_WHEEL_GAIN:
+		return "AttrChiralWheelGain";
+	case QUIRK_ATTR_CHIRAL_PAGE_GAIN:
+		return "AttrChiralPageGain";
 	case QUIRK_ATTR_THUMB_SIZE_THRESHOLD:
 		return "AttrThumbSizeThreshold";
 	case QUIRK_ATTR_MSC_TIMESTAMP:
@@ -948,6 +956,37 @@ parse_attr(struct quirks_context *ctx,
 		if (!safe_atod(value, &d))
 			goto out;
 		if (d < 0.25 || d > 4.0)
+			goto out;
+		p->type = PT_DOUBLE;
+		p->value.d = d;
+		rc = true;
+	} else if (streq(key, quirk_get_name(QUIRK_ATTR_SCROLL_SMOOTHNESS))) {
+		p->id = QUIRK_ATTR_SCROLL_SMOOTHNESS;
+		if (!safe_atou(value, &v))
+			goto out;
+		if (v < 1 || v > 6)
+			goto out;
+		p->type = PT_UINT;
+		p->value.u = v;
+		rc = true;
+	} else if (streq(key, quirk_get_name(QUIRK_ATTR_COASTING_FRICTION))) {
+		p->id = QUIRK_ATTR_COASTING_FRICTION;
+		if (!safe_atod(value, &d))
+			goto out;
+		if (d < 5.0 || d > 500.0)
+			goto out;
+		p->type = PT_DOUBLE;
+		p->value.d = d;
+		rc = true;
+	} else if (streq(key, quirk_get_name(QUIRK_ATTR_CHIRAL_WHEEL_GAIN)) ||
+		   streq(key, quirk_get_name(QUIRK_ATTR_CHIRAL_PAGE_GAIN))) {
+		if (streq(key, quirk_get_name(QUIRK_ATTR_CHIRAL_WHEEL_GAIN)))
+			p->id = QUIRK_ATTR_CHIRAL_WHEEL_GAIN;
+		else
+			p->id = QUIRK_ATTR_CHIRAL_PAGE_GAIN;
+		if (!safe_atod(value, &d))
+			goto out;
+		if (d <= 0.0 || d > 4096.0)
 			goto out;
 		p->type = PT_DOUBLE;
 		p->value.d = d;

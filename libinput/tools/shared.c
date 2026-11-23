@@ -1013,6 +1013,7 @@ tools_list_device_quirks(struct quirks_context *ctx,
 					 r.lower);
 				callback(userdata, buf);
 				break;
+			case QUIRK_ATTR_SCROLL_SMOOTHNESS:
 			case QUIRK_ATTR_CIRCULAR_SCROLL_TRIGGER:
 			case QUIRK_ATTR_POINTER_MOMENTUM_STRENGTH:
 			case QUIRK_ATTR_PALM_SIZE_THRESHOLD:
@@ -1036,6 +1037,9 @@ tools_list_device_quirks(struct quirks_context *ctx,
 			case QUIRK_ATTR_POINTER_MOMENTUM_DECAY_CURVE:
 			case QUIRK_ATTR_SCROLL_SPEED_2FG:
 			case QUIRK_ATTR_SCROLL_SPEED_EDGE:
+			case QUIRK_ATTR_CHIRAL_WHEEL_GAIN:
+			case QUIRK_ATTR_CHIRAL_PAGE_GAIN:
+			case QUIRK_ATTR_COASTING_FRICTION:
 			case QUIRK_ATTR_SCROLL_SPEED_CIRCULAR:
 			case QUIRK_ATTR_POINTER_MOMENTUM_MIN_VELOCITY:
 			case QUIRK_ATTR_TRACKPOINT_MULTIPLIER:

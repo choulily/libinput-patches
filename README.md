@@ -36,6 +36,8 @@ survives upgrades.
 ## What is here
 
 ```
+ultranav-re/       analysis of the ThinkPad T410 UltraNav driver, and a Qt
+                   recreation of its settings UI
 libinput/          the fork: libinput 1.32.0 + the two features
   PKGBUILD         Arch package that replaces stock libinput
   quirks/          50-system-lenovo.quirks: T60..T440p defaults
@@ -66,9 +68,16 @@ release, and stops on any new touch, button or suspend.
 circular scrolling can both be active. They address different fingers, so
 they do not conflict.
 
-**Advanced tuning** (API and quirks only, not in the GUI): momentum decay
-curve, and independent scroll speed for each of two-finger, edge and
-circular scrolling.
+**Advanced tuning** (API and quirks only, not in the GUI): momentum
+friction, scroll smoothness, per-method scroll speeds and the circular
+scrolling gains.
+
+**Tuned against the real driver.** The momentum and circular-scrolling
+physics were corrected after analysing the ThinkPad T410 UltraNav driver
+(Synaptics 16.2.19.7). Momentum now uses the original's constant
+deceleration and its 20-scroll-events/second engagement gate instead of
+exponential decay, which is why it coasts rather than drifts. Circular
+scrolling gained the original's wheel/page gains. See `ultranav-re/`.
 
 Both are opt-in, except on the ThinkPad generation that shipped circular
 scrolling in its Windows driver (T60 through T440p, via a quirk).

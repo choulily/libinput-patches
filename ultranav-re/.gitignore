@@ -1,0 +1,6 @@
+# The extracted driver payload (76 MB) and the installer (28 MB) are not
+# committed; they are reproducible from the URL in findings/. Keep only the
+# analysis output, the recovered UI data and the assets the UI uses.
+6hgx75ww.exe
+extracted/
+ui/build/

@@ -124,14 +124,47 @@ tp_scroll_apply_speed(struct normalized_coords delta, double multiplier)
 	return delta;
 }
 
+/*
+ * ScrollingSmoothnessFactor from the original driver, quantised to 1..6.
+ *
+ * The Windows driver smooths scroll output rather than emitting one event
+ * per raw sample; the effect is a low-pass filter whose strength falls as
+ * the setting rises. 1 is the smoothest (heaviest filtering), 6 the most
+ * responsive (almost none). This is the knob that makes scrolling feel
+ * "right" on these pads, so a per-device scale is not a good substitute.
+ */
+static double
+tp_scroll_smoothness_alpha(struct tp_dispatch *tp)
+{
+	const int s = max(1, min(6, tp->scroll.smoothness));
+
+	/* 1 -> 0.35 (heavy smoothing), 6 -> 0.95 (nearly raw) */
+	return 0.35 + (s - 1) * (0.95 - 0.35) / 5.0;
+}
+
 struct normalized_coords
 tp_filter_scroll_speed(struct tp_dispatch *tp,
 		       const struct device_float_coords *unaccelerated,
 		       usec_t time,
 		       double multiplier)
 {
-	return tp_scroll_apply_speed(tp_filter_scroll(tp, unaccelerated, time),
-				     multiplier);
+	struct normalized_coords delta =
+		tp_filter_scroll(tp, unaccelerated, time);
+	const double alpha = tp_scroll_smoothness_alpha(tp);
+	const struct normalized_coords *prev = &tp->scroll.smoothed;
+
+	/* Exponential moving average, reset by a gap. */
+	if (usec_cmp(usec_delta(time, tp->scroll.smooth_time),
+			   usec_from_millis(100)) > 0) {
+		tp->scroll.smoothed = delta;
+	} else {
+		delta.x = prev->x + alpha * (delta.x - prev->x);
+		delta.y = prev->y + alpha * (delta.y - prev->y);
+		tp->scroll.smoothed = delta;
+	}
+	tp->scroll.smooth_time = time;
+
+	return tp_scroll_apply_speed(delta, multiplier);
 }
 
 static inline void
@@ -3304,6 +3337,7 @@ tp_init_scroll(struct tp_dispatch *tp, struct evdev_device *device)
 	tp->scroll.speed.two_finger = 1.0;
 	tp->scroll.speed.edge = 1.0;
 	tp->scroll.speed.circular = 1.0;
+	tp->scroll.smoothness = 3; /* middle of the original 1..6 range */
 
 	/* Quirk-driven defaults.
 	 *
@@ -3368,6 +3402,23 @@ tp_init_scroll(struct tp_dispatch *tp, struct evdev_device *device)
 
 	if (q && quirks_get_double(q, QUIRK_ATTR_SCROLL_SPEED_CIRCULAR, &speed))
 		tp->scroll.speed.circular = speed;
+
+	uint32_t smoothness;
+	if (q && quirks_get_uint32(q, QUIRK_ATTR_SCROLL_SMOOTHNESS, &smoothness))
+		tp->scroll.smoothness = smoothness;
+
+	/* CoastingFriction is the original's name for what the API calls
+	 * momentum strength: friction 50 is strength 100%. */
+	if (q && quirks_get_double(q, QUIRK_ATTR_COASTING_FRICTION, &speed)) {
+		int strength = (int)(100.0 * 50.0 / speed); /* 50 = friction at 100% */
+		tp->momentum.strength = max(10, min(400, strength));
+	}
+
+	if (q && quirks_get_double(q, QUIRK_ATTR_CHIRAL_WHEEL_GAIN, &speed))
+		tp->scroll.circular.wheel_gain = speed;
+
+	if (q && quirks_get_double(q, QUIRK_ATTR_CHIRAL_PAGE_GAIN, &speed))
+		tp->scroll.circular.page_gain = speed;
 
 	/* In mm for touchpads with valid resolution, see tp_init_accel() */
 	tp->device->scroll.threshold = 0.0;
